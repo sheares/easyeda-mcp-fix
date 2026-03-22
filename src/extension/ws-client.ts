@@ -17,7 +17,7 @@ import { pcbPrimitiveHandlers } from './handlers/pcb-primitive';
 import { editorHandlers } from './handlers/editor';
 
 const PORT_RANGE_START = 15168;
-const PORT_RANGE_SIZE = 20;
+const PORT_RANGE_SIZE = 40;
 
 // Generate a random 8-character hex instance ID for this tab.
 // Stored on globalThis so it survives extension IIFE re-evaluations

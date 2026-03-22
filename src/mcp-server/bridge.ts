@@ -57,7 +57,7 @@ export class WebSocketBridge {
 	private readonly timeout: number;
 	readonly agentId: string;
 
-	constructor(private readonly port: number = 15168, timeout = 30000) {
+	constructor(private readonly port: number = 15168, timeout = 45000) {
 		this.timeout = timeout;
 		this.agentId = randomBytes(8).toString('hex');
 	}

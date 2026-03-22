@@ -27,18 +27,43 @@ export function registerSchWriteTools(server: McpServer, bridge: WebSocketBridge
 		},
 	);
 
+	const netFlagItemSchema = z.object({
+		identification: z
+			.enum(['Power', 'Ground', 'AnalogGround', 'ProtectGround'])
+			.describe('Net flag type'),
+		net: z.string().describe('Net name (e.g. "VCC", "GND", "3V3")'),
+		x: z.number().describe('X coordinate (X axis points rightward — higher values = further right)'),
+		y: z.number().describe('Y coordinate (Y axis points upward — higher values = higher on screen)'),
+		rotation: z.number().optional().describe('Rotation angle in degrees'),
+		mirror: z.boolean().optional().describe('Whether to mirror'),
+		component: z
+			.object({ libraryUuid: z.string(), uuid: z.string() })
+			.optional()
+			.describe('Library device reference override'),
+	});
+
 	server.tool(
 		'sch_create_net_flag',
-		'Create a Power/Ground/AnalogGround/ProtectGround net flag in the schematic',
+		'Create one or more Power/Ground/AnalogGround/ProtectGround net flags in the schematic. Pass individual parameters for a single flag, or use "batch" array for multiple flags in one call.',
 		withDocumentParam({
 			identification: z
 				.enum(['Power', 'Ground', 'AnalogGround', 'ProtectGround'])
-				.describe('Net flag type'),
-			net: z.string().describe('Net name (e.g. "VCC", "GND", "3V3")'),
-			x: z.number().describe('X coordinate (X axis points rightward — higher values = further right)'),
-			y: z.number().describe('Y coordinate (Y axis points upward — higher values = higher on screen)'),
+				.optional()
+				.describe('Net flag type (for single creation)'),
+			net: z.string().optional().describe('Net name (for single creation)'),
+			x: z.number().optional().describe('X coordinate (for single creation)'),
+			y: z.number().optional().describe('Y coordinate (for single creation)'),
 			rotation: z.number().optional().describe('Rotation angle in degrees'),
 			mirror: z.boolean().optional().describe('Whether to mirror'),
+			component: z
+				.object({ libraryUuid: z.string(), uuid: z.string() })
+				.optional()
+				.describe('Library device reference override'),
+			batch: z
+				.array(netFlagItemSchema)
+				.max(10)
+				.optional()
+				.describe('Array of net flags to create in one call (max 10 — each takes ~1.5s). When provided, the individual parameters above are ignored.'),
 		}),
 		async (params) => {
 			const result = await bridge.send('sch.component.createNetFlag', params);
@@ -46,16 +71,38 @@ export function registerSchWriteTools(server: McpServer, bridge: WebSocketBridge
 		},
 	);
 
+	const netPortItemSchema = z.object({
+		direction: z.enum(['IN', 'OUT', 'BI']).describe('Port direction'),
+		net: z.string().describe('Net name'),
+		x: z.number().describe('X coordinate'),
+		y: z.number().describe('Y coordinate'),
+		rotation: z.number().optional().describe('Rotation angle in degrees'),
+		mirror: z.boolean().optional().describe('Whether to mirror'),
+		component: z
+			.object({ libraryUuid: z.string(), uuid: z.string() })
+			.optional()
+			.describe('Library device reference override'),
+	});
+
 	server.tool(
 		'sch_create_net_port',
-		'Create an IN/OUT/BI directional net port in the schematic',
+		'Create one or more IN/OUT/BI directional net ports in the schematic. Pass individual parameters for a single port, or use "batch" array for multiple ports in one call.',
 		withDocumentParam({
-			direction: z.enum(['IN', 'OUT', 'BI']).describe('Port direction'),
-			net: z.string().describe('Net name'),
-			x: z.number().describe('X coordinate'),
-			y: z.number().describe('Y coordinate'),
+			direction: z.enum(['IN', 'OUT', 'BI']).optional().describe('Port direction (for single creation)'),
+			net: z.string().optional().describe('Net name (for single creation)'),
+			x: z.number().optional().describe('X coordinate (for single creation)'),
+			y: z.number().optional().describe('Y coordinate (for single creation)'),
 			rotation: z.number().optional().describe('Rotation angle in degrees'),
 			mirror: z.boolean().optional().describe('Whether to mirror'),
+			component: z
+				.object({ libraryUuid: z.string(), uuid: z.string() })
+				.optional()
+				.describe('Library device reference override'),
+			batch: z
+				.array(netPortItemSchema)
+				.max(10)
+				.optional()
+				.describe('Array of net ports to create in one call (max 10 — each takes ~1.5s). When provided, the individual parameters above are ignored.'),
 		}),
 		async (params) => {
 			const result = await bridge.send('sch.component.createNetPort', params);
