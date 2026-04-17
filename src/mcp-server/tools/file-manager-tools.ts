@@ -23,12 +23,19 @@ import type { ValidationReport } from '../../lib/schema';
  * ~/.easyeda-mcp-backup (override with the EDA_BACKUP_DIR env var).
  *
  * Validation: document_set_source and document_load_from_file accept an optional
- * `validate` parameter ('off' | 'warn' | 'strict', default 'warn'). Validation
+ * `validate` parameter ('off' | 'warn' | 'strict', default 'strict'). Validation
  * runs only for schematic documents (documentType=1) — other types skip with a
- * status. In 'warn', schema-invalid known-tag lines and JSON parse errors abort
- * the upload (these are almost always writer bugs); only unknown-tag shapes are
- * tolerated. In 'strict', unknown tags also abort. Validation happens before
- * backup; if validation aborts, no backup is taken and EasyEDA is untouched.
+ * status. In 'strict' (default), any validation issue aborts the upload. In
+ * 'warn', only schema-invalid known-tag lines and JSON parse errors abort
+ * (these are almost always writer bugs); unknown-tag shapes pass through with a
+ * log to the discovery file. Validation happens before backup; if validation
+ * aborts, no backup is taken and EasyEDA is untouched.
+ *
+ * Download-side validation: document_get_source, document_save_to_file, and
+ * document_validate run in 'warn' mode on the EasyEDA output. Rationale: what
+ * EasyEDA emits is by definition correct; a mismatch means our schema is
+ * missing coverage, not that the data is bad. Unknowns feed the discovery log;
+ * invalids surface in the response so we can fix the schema.
  */
 
 const WORKFLOW_HINT = `\n\nFAST-BATCH WORKFLOW: for making many changes at once, it is much faster to export \
@@ -38,11 +45,12 @@ to issue many small per-primitive MCP calls. The document source is newline-deli
 JSON arrays; .epro files are ZIP archives of the same. Every destructive upload is \
 auto-backed-up to a local git repo first — the response includes a backup SHA you can \
 use to find the prior state if the edit goes wrong. Upload tools accept validate='off'\
-|'warn'|'strict' (default 'warn') which runs the Zod schema on the new source — see\
+|'warn'|'strict' (default 'strict') which runs the Zod schema on the new source — see\
  document_validate for standalone validation.`;
 
-const ValidateMode = z.enum(['off', 'warn', 'strict']).default('warn');
+const ValidateMode = z.enum(['off', 'warn', 'strict']);
 type ValidateMode = z.infer<typeof ValidateMode>;
+const UPLOAD_VALIDATE_DEFAULT: ValidateMode = 'strict';
 
 function formatBackupSummary(backup: BackupResult): string {
 	return `Backed up prior state to ${backup.repo} @ ${backup.sha}${backup.changed ? '' : ' (unchanged from previous backup)'} — path: ${backup.path}`;
@@ -84,10 +92,26 @@ export function registerFileManagerTools(server: McpServer, bridge: WebSocketBri
 		`Get the raw source code of the currently active document (schematic page, PCB, or panel).
 Returns the document as a string in EasyEDA's internal format (newline-delimited JSON arrays).
 Use editor_open_document to switch to the desired document first, then call this tool.
-The source can be modified and written back with document_set_source.${WORKFLOW_HINT}`,
+The source can be modified and written back with document_set_source.
+
+For schematic documents, the source is also run through the schema validator
+as a side effect — any unknown tags get logged to ~/.easyeda-schema-discovery.jsonl
+so we can grow the schema. The response itself is unchanged. Use document_validate
+for a structured validation report.${WORKFLOW_HINT}`,
 		withDocumentParam({}),
 		async ({ instance_id, ...rest }) => {
-			const result = await bridge.send('fileManager.getDocumentSource', { instance_id, ...rest }) as { source: string };
+			const result = await bridge.send('fileManager.getDocumentSource', { instance_id, ...rest }) as {
+				source: string;
+				context?: DocumentContext;
+			};
+			// Schema-discovery side effect: silently run warn-mode validation on the downloaded
+			// source. Unknowns and invalids feed the discovery log; response is unchanged so
+			// agents keep getting raw text they can copy-modify-push-back.
+			const ctx = result.context ?? {};
+			validateByDocType(result.source, ctx.documentType, {
+				projectUuid: ctx.projectUuid,
+				documentUuid: ctx.documentUuid,
+			}).catch((err) => console.error('[schema] silent validation failed:', err));
 			return { content: [{ type: 'text', text: result.source }] };
 		},
 	);
@@ -106,11 +130,11 @@ backup.sha references the pre-edit state. Validation runs only for schematic doc
 		withDocumentParam({
 			source: z.string().describe('The complete document source code to set'),
 			validate: ValidateMode.optional().describe(
-				"Schema validation mode for schematic uploads: 'off' skips entirely, 'warn' (default) aborts only on malformed known tags or JSON parse errors, 'strict' also aborts on any unknown-tag line.",
+				"Schema validation mode for schematic uploads: 'off' skips entirely, 'warn' aborts only on malformed known tags or JSON parse errors, 'strict' (default) also aborts on any unknown-tag line.",
 			),
 		}),
 		async ({ source, instance_id, document, validate }) => {
-			const mode = validate ?? 'warn';
+			const mode = validate ?? UPLOAD_VALIDATE_DEFAULT;
 
 			// Need doc-type before we can decide whether to validate. Cheap round-trip.
 			const { context } = await fetchCurrentSourceAndContext(bridge, { instance_id, document });
@@ -138,15 +162,29 @@ backup.sha references the pre-edit state. Validation runs only for schematic doc
 		`Save the source code of the currently active document to a local file.
 Fetches the document source from EasyEDA and writes it directly to disk.
 The file will contain the document in EasyEDA's internal format (newline-delimited JSON arrays).
-Use document_load_from_file to push a modified file back.${WORKFLOW_HINT}`,
+Use document_load_from_file to push a modified file back.
+
+For schematic documents, the source is also run through the schema validator in
+warn mode — the returned JSON includes a validation report, and any unknown tags
+are logged to ~/.easyeda-schema-discovery.jsonl. Since this is a download
+(EasyEDA's output), a schema mismatch means our schema is missing coverage, not
+that the data is bad.${WORKFLOW_HINT}`,
 		withDocumentParam({
 			filePath: z.string().describe('Absolute path to write the document source to'),
 		}),
 		async ({ filePath, instance_id, ...rest }) => {
-			const result = await bridge.send('fileManager.getDocumentSource', { instance_id, ...rest }) as { source: string };
+			const result = await bridge.send('fileManager.getDocumentSource', { instance_id, ...rest }) as {
+				source: string;
+				context?: DocumentContext;
+			};
 			await mkdir(dirname(filePath), { recursive: true });
 			await writeFile(filePath, result.source, 'utf8');
-			return { content: [{ type: 'text', text: JSON.stringify({ saved: filePath, size: result.source.length }) }] };
+			const ctx = result.context ?? {};
+			const validation = await validateByDocType(result.source, ctx.documentType, {
+				projectUuid: ctx.projectUuid,
+				documentUuid: ctx.documentUuid,
+			});
+			return { content: [{ type: 'text', text: JSON.stringify({ saved: filePath, size: result.source.length, validation }, null, 2) }] };
 		},
 	);
 
@@ -162,11 +200,11 @@ other types skip with a status.${WORKFLOW_HINT}`,
 		withDocumentParam({
 			filePath: z.string().describe('Absolute path to read the document source from'),
 			validate: ValidateMode.optional().describe(
-				"Schema validation mode for schematic uploads: 'off' skips entirely, 'warn' (default) aborts only on malformed known tags or JSON parse errors, 'strict' also aborts on any unknown-tag line.",
+				"Schema validation mode for schematic uploads: 'off' skips entirely, 'warn' aborts only on malformed known tags or JSON parse errors, 'strict' (default) also aborts on any unknown-tag line.",
 			),
 		}),
 		async ({ filePath, instance_id, document, validate }) => {
-			const mode = validate ?? 'warn';
+			const mode = validate ?? UPLOAD_VALIDATE_DEFAULT;
 			const source = await readFile(filePath, 'utf8');
 
 			const { context } = await fetchCurrentSourceAndContext(bridge, { instance_id, document });
