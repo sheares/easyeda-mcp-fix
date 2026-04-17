@@ -15,6 +15,7 @@ import { manufactureHandlers } from './handlers/manufacture';
 import { layerHandlers } from './handlers/layer';
 import { pcbPrimitiveHandlers } from './handlers/pcb-primitive';
 import { editorHandlers } from './handlers/editor';
+import { fileManagerHandlers } from './handlers/file-manager';
 
 const PORT_RANGE_START = 15168;
 const PORT_RANGE_SIZE = 40;
@@ -141,6 +142,7 @@ const allHandlers: Record<string, (params: Record<string, any>) => Promise<any>>
 	...layerHandlers,
 	...pcbPrimitiveHandlers,
 	...editorHandlers,
+	...fileManagerHandlers,
 };
 
 async function getInstanceInfo(): Promise<Record<string, any>> {
@@ -321,7 +323,9 @@ function sendResponse(extensionUuid: string, port: number, id: string, result?: 
 	} catch {
 		// Send failed — connection is dead, remove from tracked ports
 		connectedPorts.delete(port);
+		lastReceivedTime.delete(port);
 		adjustScanInterval();
+		scheduleReconnect(extensionUuid, port);
 	}
 }
 
@@ -330,7 +334,9 @@ function sendNotification(extensionUuid: string, port: number, type: string, dat
 		eda.sys_WebSocket.send(wsIdForPort(port), JSON.stringify({ type, data }), extensionUuid);
 	} catch {
 		connectedPorts.delete(port);
+		lastReceivedTime.delete(port);
 		adjustScanInterval();
+		scheduleReconnect(extensionUuid, port);
 	}
 }
 
@@ -460,6 +466,21 @@ export function getConnectedPorts(): number[] {
 	return [...connectedPorts.keys()];
 }
 
+// Reconnect: when a connection is lost (heartbeat timeout or send failure),
+// schedule a few quick retries to that specific port before falling back to
+// the slower live-mode scan.
+const RECONNECT_DELAYS_MS = [2_000, 5_000, 15_000];
+
+function scheduleReconnect(extensionUuid: string, port: number): void {
+	for (const delay of RECONNECT_DELAYS_MS) {
+		setTimeout(() => {
+			if (!connectedPorts.has(port) && !connectingPorts.has(port)) {
+				connectToSinglePort(extensionUuid, port);
+			}
+		}, delay);
+	}
+}
+
 // Keepalive: detect dead connections by pinging bridges that have gone quiet.
 // Checks run every HEARTBEAT_INTERVAL_MS. If no message received in
 // QUIET_THRESHOLD_MS, send a ping. If still no message after DEAD_THRESHOLD_MS
@@ -486,11 +507,12 @@ function runHeartbeat(extensionUuid: string): void {
 				// Already gone
 			}
 			eda.sys_Message.showToastMessage(
-				`Lost connection to Claude MCP Server on port ${port}`,
+				`Lost connection to Claude MCP Server on port ${port} — reconnecting...`,
 				ESYS_ToastMessageType.WARNING,
 				5,
 			);
 			adjustScanInterval();
+			scheduleReconnect(extensionUuid, port);
 		} else if (silenceMs >= QUIET_THRESHOLD_MS) {
 			// Bridge has been quiet — send a ping to check
 			try {
@@ -500,6 +522,7 @@ function runHeartbeat(extensionUuid: string): void {
 				connectedPorts.delete(port);
 				lastReceivedTime.delete(port);
 				adjustScanInterval();
+				scheduleReconnect(extensionUuid, port);
 			}
 		}
 	}
