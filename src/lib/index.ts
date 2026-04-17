@@ -3,3 +3,4 @@ export type { SchematicModel, ComponentInfo, PinInfo, WireInfo, NetInfo, SymbolI
 export { SchematicWriter } from './schematic-writer';
 export { loadSchematic, listSchematics } from './loader';
 export type { LoadedSchematic } from './loader';
+export * as schema from './schema';

@@ -13,26 +13,114 @@
  *   writer.addNetport("FPGA_TCK", "U2.16");           // auto-position from pin
  *   writer.addSeriesResistor("0402WGF220JTCE", "U2.16", "FPGA_TCK"); // auto-designator
  *   const newSource = writer.serialize();
+ *
+ * New lines are built via schema-validated factories — a broken tuple shape
+ * throws at construction time, not later when EasyEDA rejects the upload.
  */
 
 import { SchematicModel, ComponentInfo, PinInfo } from './schematic-reader';
+import {
+	AttrLine,
+	ComponentLine,
+	EschLine,
+	HeadLine,
+	WireLine,
+	serializeEschLines,
+	type ParsedLine,
+} from './schema';
 
-interface NewLine {
-	content: string;
+function makeLine<L>(data: L): ParsedLine<L> {
+	return { kind: 'known', data, raw: JSON.stringify(data), lineIndex: -1, mutated: true };
+}
+
+function makeComponentLine(args: {
+	elementId: string;
+	partName: string;
+	x: number;
+	y: number;
+	rotation: number;
+	flip?: number;
+	options?: Record<string, unknown>;
+	layer?: number;
+}): ParsedLine<EschLine> {
+	const tuple: unknown = [
+		'COMPONENT',
+		args.elementId,
+		args.partName,
+		args.x,
+		args.y,
+		args.rotation,
+		args.flip ?? 0,
+		args.options ?? {},
+		args.layer ?? 0,
+	];
+	const validated = ComponentLine.parse(tuple);
+	return makeLine<EschLine>(validated);
+}
+
+function makeAttrLine(args: {
+	elementId: string;
+	parentId: string;
+	attrName: string;
+	value: unknown;
+	visible?: unknown;
+	x?: unknown;
+	y?: unknown;
+	fontStyleId: string | null;
+	layer?: number;
+	trailingSlot5?: unknown;  // position 5 — typically null
+	trailingSlot9?: unknown;  // position 9 — sometimes rotation, sometimes null
+}): ParsedLine<EschLine> {
+	const tuple: unknown = [
+		'ATTR',
+		args.elementId,
+		args.parentId,
+		args.attrName,
+		args.value,
+		args.trailingSlot5 ?? null,
+		args.visible ?? null,
+		args.x ?? null,
+		args.y ?? null,
+		args.trailingSlot9 ?? null,
+		args.fontStyleId,
+		args.layer ?? 0,
+	];
+	const validated = AttrLine.parse(tuple);
+	return makeLine<EschLine>(validated);
+}
+
+function makeWireLine(args: {
+	elementId: string;
+	segments: number[][];
+	lineStyleId: string;
+	layer?: number;
+}): ParsedLine<EschLine> {
+	const tuple: unknown = [
+		'WIRE',
+		args.elementId,
+		args.segments,
+		args.lineStyleId,
+		args.layer ?? 0,
+	];
+	const validated = WireLine.parse(tuple);
+	return makeLine<EschLine>(validated);
 }
 
 export class SchematicWriter {
 	private model: SchematicModel;
-	private originalLines: string[];
-	private appendedLines: NewLine[] = [];
+	/** Parsed lines from the original source. Mutations are applied in place (e.g. HEAD.maxId). */
+	private lines: ParsedLine<EschLine>[];
+	/** New lines appended at the end on serialize. */
+	private appendedLines: ParsedLine<EschLine>[] = [];
+	/** Line indices in `lines` to skip on serialize. */
 	private removedLineIndices = new Set<number>();
 	private nextElementId: number;
 	private nextGgeId: number;
 	private nextDesignatorNum: Record<string, number> = {};
 
-	constructor(source: string, model: SchematicModel) {
+	constructor(_source: string, model: SchematicModel) {
 		this.model = model;
-		this.originalLines = source.split('\n');
+		this.lines = model.parsedLines;
 		this.nextElementId = model.maxId + 1;
 		this.nextGgeId = model.maxGgeId + 1;
 
@@ -110,14 +198,8 @@ export class SchematicWriter {
 	 * Determine the correct netport rotation for a pin, so the netport
 	 * arrow points toward the component (IN-style).
 	 *
-	 * The netport should face the opposite direction from the pin stub:
-	 * pin angle 0 (stub points right, pin is on left side) -> netport rotation 0 (points right, toward chip)
-	 * pin angle 180 (stub points left, pin is on right side) -> netport rotation 180 (points left, toward chip)
-	 * pin angle 90 (stub points up, pin is on bottom) -> netport rotation 90 (points up, toward chip)
-	 * pin angle 270 (stub points down, pin is on top) -> netport rotation 270 (points down, toward chip)
-	 *
-	 * Wait — for IN-style netports, the arrow points in the same direction as the pin stub.
-	 * The netport rotation matches the pin's world angle.
+	 * For IN-style netports, the arrow direction matches the pin's world angle —
+	 * pin stub pointing right (angle 0) -> netport rotation 0 (arrow points right toward chip).
 	 */
 	private netportRotationForPin(pin: PinInfo): number {
 		return pin.worldAngle;
@@ -146,25 +228,45 @@ export class SchematicWriter {
 		if (!np) throw new Error('No netport template found in schematic palette');
 
 		const compId = this.allocId();
-		const symAttrId = this.allocId();
-		const nameAttrId = this.allocId();
-		const devAttrId = this.allocId();
-		const relAttrId = this.allocId();
 		const wireId = this.allocId();
-		const netAttrId = this.allocId();
 
 		const symFs = np.fontStyles['Symbol'] || 'st7';
 		const nameFs = np.fontStyles['Name'] || 'st8';
 		const devFs = np.fontStyles['Device'] || 'st5';
 
 		this.appendedLines.push(
-			{ content: `["COMPONENT","${compId}","",${x},${y},${rotation},0,{},0]` },
-			{ content: `["ATTR","${symAttrId}","${compId}","Symbol","${np.symbolUuid}",null,null,null,null,null,"${symFs}",0]` },
-			{ content: `["ATTR","${nameAttrId}","${compId}","Name","${netName}",null,null,null,null,null,"${nameFs}",0]` },
-			{ content: `["ATTR","${devAttrId}","${compId}","Device","${np.deviceUuid}",0,0,null,null,0,"${devFs}",0]` },
-			{ content: `["ATTR","${relAttrId}","${compId}","Relevance","[]",0,0,${x},${y},0,"st4",0]` },
-			{ content: `["WIRE","${wireId}",[[${x},${y},${x},${y}]],"${this.model.palette.wireLineStyle}",0]` },
-			{ content: `["ATTR","${netAttrId}","${wireId}","NET","${netName}",0,0,${x},${y},90,"st4",0]` },
+			makeComponentLine({
+				elementId: compId, partName: '',
+				x, y, rotation,
+			}),
+			makeAttrLine({
+				elementId: this.allocId(), parentId: compId,
+				attrName: 'Symbol', value: np.symbolUuid, fontStyleId: symFs,
+			}),
+			makeAttrLine({
+				elementId: this.allocId(), parentId: compId,
+				attrName: 'Name', value: netName, fontStyleId: nameFs,
+			}),
+			makeAttrLine({
+				elementId: this.allocId(), parentId: compId,
+				attrName: 'Device', value: np.deviceUuid,
+				visible: 0, trailingSlot5: 0, trailingSlot9: 0, fontStyleId: devFs,
+			}),
+			makeAttrLine({
+				elementId: this.allocId(), parentId: compId,
+				attrName: 'Relevance', value: '[]',
+				visible: 0, trailingSlot5: 0, x, y, trailingSlot9: 0, fontStyleId: 'st4',
+			}),
+			makeWireLine({
+				elementId: wireId,
+				segments: [[x, y, x, y]],
+				lineStyleId: this.model.palette.wireLineStyle,
+			}),
+			makeAttrLine({
+				elementId: this.allocId(), parentId: wireId,
+				attrName: 'NET', value: netName,
+				visible: 0, trailingSlot5: 0, x, y, trailingSlot9: 90, fontStyleId: 'st4',
+			}),
 		);
 	}
 
@@ -186,10 +288,13 @@ export class SchematicWriter {
 	 * Required when two component pins overlap to create an electrical connection.
 	 */
 	addJunctionWire(x: number, y: number): void {
-		const wireId = this.allocId();
-		this.appendedLines.push({
-			content: `["WIRE","${wireId}",[[${x},${y},${x},${y}]],"${this.model.palette.wireLineStyle}",0]`,
-		});
+		this.appendedLines.push(
+			makeWireLine({
+				elementId: this.allocId(),
+				segments: [[x, y, x, y]],
+				lineStyleId: this.model.palette.wireLineStyle,
+			}),
+		);
 	}
 
 	/**
@@ -212,15 +317,48 @@ export class SchematicWriter {
 		const devFs = template.fontStyles['Device'] || 'st5';
 
 		this.appendedLines.push(
-			{ content: `["COMPONENT","${compId}","${partName}.1",${x},${y},${rotation},0,{},0]` },
-			{ content: `["ATTR","${this.allocId()}","${compId}","Symbol","${template.symbolUuid}",null,null,null,null,null,"${symFs}",0]` },
-			{ content: `["ATTR","${this.allocId()}","${compId}","Designator","${designator}",null,1,${x},${y + 10},null,"${desigFs}",0]` },
-			{ content: `["ATTR","${this.allocId()}","${compId}","Name",null,null,1,${x},${y - 10},null,"st4",0]` },
-			{ content: `["ATTR","${this.allocId()}","${compId}","Device","${template.deviceUuid}",0,0,null,null,0,"${devFs}",0]` },
-			{ content: `["ATTR","${this.allocId()}","${compId}","Reuse Block","",0,0,null,null,0,"st4",0]` },
-			{ content: `["ATTR","${this.allocId()}","${compId}","Group ID","",0,0,null,null,0,"st4",0]` },
-			{ content: `["ATTR","${this.allocId()}","${compId}","Channel ID","",0,0,null,null,0,"st4",0]` },
-			{ content: `["ATTR","${this.allocId()}","${compId}","Unique ID","${ggeId}",0,0,null,null,0,"st4",0]` },
+			makeComponentLine({
+				elementId: compId, partName: `${partName}.1`, x, y, rotation,
+			}),
+			makeAttrLine({
+				elementId: this.allocId(), parentId: compId,
+				attrName: 'Symbol', value: template.symbolUuid, fontStyleId: symFs,
+			}),
+			makeAttrLine({
+				elementId: this.allocId(), parentId: compId,
+				attrName: 'Designator', value: designator,
+				visible: 1, x, y: y + 10, fontStyleId: desigFs,
+			}),
+			makeAttrLine({
+				elementId: this.allocId(), parentId: compId,
+				attrName: 'Name', value: null,
+				visible: 1, x, y: y - 10, fontStyleId: 'st4',
+			}),
+			makeAttrLine({
+				elementId: this.allocId(), parentId: compId,
+				attrName: 'Device', value: template.deviceUuid,
+				visible: 0, trailingSlot5: 0, trailingSlot9: 0, fontStyleId: devFs,
+			}),
+			makeAttrLine({
+				elementId: this.allocId(), parentId: compId,
+				attrName: 'Reuse Block', value: '',
+				visible: 0, trailingSlot5: 0, trailingSlot9: 0, fontStyleId: 'st4',
+			}),
+			makeAttrLine({
+				elementId: this.allocId(), parentId: compId,
+				attrName: 'Group ID', value: '',
+				visible: 0, trailingSlot5: 0, trailingSlot9: 0, fontStyleId: 'st4',
+			}),
+			makeAttrLine({
+				elementId: this.allocId(), parentId: compId,
+				attrName: 'Channel ID', value: '',
+				visible: 0, trailingSlot5: 0, trailingSlot9: 0, fontStyleId: 'st4',
+			}),
+			makeAttrLine({
+				elementId: this.allocId(), parentId: compId,
+				attrName: 'Unique ID', value: ggeId,
+				visible: 0, trailingSlot5: 0, trailingSlot9: 0, fontStyleId: 'st4',
+			}),
 		);
 	}
 
@@ -248,6 +386,7 @@ export class SchematicWriter {
 		// Place resistor so one pin touches the IC pin
 		// The resistor orientation should be along the pin's outward direction
 		const [outX, outY] = this.pinOutwardOffset(pin, RES_PIN_OFFSET);
+		void outX; void outY; // consumed implicitly by the switch below
 
 		let resRotation: number;
 		let resCenterX: number;
@@ -316,23 +455,48 @@ export class SchematicWriter {
 		const compId = this.allocId();
 		const rotation = this.netportRotationForPin(pin);
 
-		// Power symbols use similar structure to netports but with Global Net Name
 		this.appendedLines.push(
-			{ content: `["COMPONENT","${compId}","",${pin.worldX},${pin.worldY},${rotation},0,{},0]` },
-			{ content: `["ATTR","${this.allocId()}","${compId}","Symbol","${template.symbolUuid}",null,null,null,null,null,"st12",0]` },
-			{ content: `["ATTR","${this.allocId()}","${compId}","Device","${template.deviceUuid}",0,0,null,null,0,"st5",0]` },
-			{ content: `["ATTR","${this.allocId()}","${compId}","Name","${railName}",0,0,null,null,0,"st4",0]` },
-			{ content: `["ATTR","${this.allocId()}","${compId}","Relevance","[]",0,0,${pin.worldX},${pin.worldY},0,"st4",0]` },
+			makeComponentLine({
+				elementId: compId, partName: '',
+				x: pin.worldX, y: pin.worldY, rotation,
+			}),
+			makeAttrLine({
+				elementId: this.allocId(), parentId: compId,
+				attrName: 'Symbol', value: template.symbolUuid, fontStyleId: 'st12',
+			}),
+			makeAttrLine({
+				elementId: this.allocId(), parentId: compId,
+				attrName: 'Device', value: template.deviceUuid,
+				visible: 0, trailingSlot5: 0, trailingSlot9: 0, fontStyleId: 'st5',
+			}),
+			makeAttrLine({
+				elementId: this.allocId(), parentId: compId,
+				attrName: 'Name', value: railName,
+				visible: 0, trailingSlot5: 0, trailingSlot9: 0, fontStyleId: 'st4',
+			}),
+			makeAttrLine({
+				elementId: this.allocId(), parentId: compId,
+				attrName: 'Relevance', value: '[]',
+				visible: 0, trailingSlot5: 0, x: pin.worldX, y: pin.worldY, trailingSlot9: 0, fontStyleId: 'st4',
+			}),
 		);
 
-		// Junction wire
+		// Junction wire at the pin
 		this.addJunctionWire(pin.worldX, pin.worldY);
 
-		// Wire with NET
+		// Wire with NET attr
 		const wireId = this.allocId();
 		this.appendedLines.push(
-			{ content: `["WIRE","${wireId}",[[${pin.worldX},${pin.worldY},${pin.worldX},${pin.worldY}]],"${this.model.palette.wireLineStyle}",0]` },
-			{ content: `["ATTR","${this.allocId()}","${wireId}","NET","${railName}",0,0,${pin.worldX},${pin.worldY},90,"st4",0]` },
+			makeWireLine({
+				elementId: wireId,
+				segments: [[pin.worldX, pin.worldY, pin.worldX, pin.worldY]],
+				lineStyleId: this.model.palette.wireLineStyle,
+			}),
+			makeAttrLine({
+				elementId: this.allocId(), parentId: wireId,
+				attrName: 'NET', value: railName,
+				visible: 0, trailingSlot5: 0, x: pin.worldX, y: pin.worldY, trailingSlot9: 90, fontStyleId: 'st4',
+			}),
 		);
 	}
 
@@ -340,16 +504,11 @@ export class SchematicWriter {
 	 * Remove lines by element ID — removes the element and all ATTRs that reference it.
 	 */
 	removeElement(elementId: string): void {
-		for (let i = 0; i < this.originalLines.length; i++) {
-			const trimmed = this.originalLines[i].trim();
-			if (!trimmed) continue;
-			try {
-				const row = JSON.parse(trimmed);
-				if (row[1] === elementId || row[2] === elementId) {
-					this.removedLineIndices.add(i);
-				}
-			} catch {
-				// Skip unparseable lines
+		for (const line of this.lines) {
+			if (line.kind !== 'known') continue;
+			const d = line.data;
+			if (d[1] === elementId || d[2] === elementId) {
+				this.removedLineIndices.add(line.lineIndex);
 			}
 		}
 	}
@@ -358,30 +517,28 @@ export class SchematicWriter {
 	 * Serialize the modified schematic back to a string.
 	 */
 	serialize(): string {
-		const result: string[] = [];
-
-		for (let i = 0; i < this.originalLines.length; i++) {
-			if (this.removedLineIndices.has(i)) continue;
-
-			const line = this.originalLines[i];
-			const trimmed = line.trim();
-
-			// Update HEAD with new maxId
-			if (trimmed.startsWith('["HEAD"')) {
-				const head = JSON.parse(trimmed);
-				head[1].maxId = this.nextElementId - 1;
-				result.push(JSON.stringify(head));
-				continue;
+		// Update HEAD.maxId in place (mutation).
+		for (const line of this.lines) {
+			if (line.kind !== 'known') continue;
+			if (line.data[0] !== 'HEAD') continue;
+			const meta = line.data[1] as { maxId?: number };
+			const newMaxId = this.nextElementId - 1;
+			if (meta.maxId !== newMaxId) {
+				meta.maxId = newMaxId;
+				line.mutated = true;
 			}
-
-			result.push(line);
+			break;
 		}
 
-		// Append new lines
-		for (const nl of this.appendedLines) {
-			result.push(nl.content);
-		}
-
-		return result.join('\n');
+		// Skip removed lines; otherwise emit via the shared serializer.
+		const keep = this.lines.filter((l) => !this.removedLineIndices.has(l.lineIndex));
+		const original = serializeEschLines(keep);
+		const appended = this.appendedLines.length > 0
+			? '\n' + serializeEschLines(this.appendedLines)
+			: '';
+		return original + appended;
 	}
 }
+
+// Re-exports kept for library consumers that imported these from writer previously.
+export type { HeadLine };

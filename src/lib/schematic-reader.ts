@@ -1,10 +1,20 @@
 /**
  * Parses EasyEDA Pro .esch schematic source into a structured model.
  *
- * The raw format is newline-delimited JSON arrays. This reader produces
- * a clean object model with computed pin world positions, net assignments,
- * and a "palette" of reusable template UUIDs (netport symbol, device, etc.)
+ * The raw format is newline-delimited JSON arrays. This reader runs lines
+ * through the Zod-backed schema in ./schema/, then builds a clean object
+ * model with computed pin world positions, net assignments, and a "palette"
+ * of reusable template UUIDs (netport symbol, device, etc.)
  */
+
+import {
+	parseEschSource,
+	parseEsymSource,
+	type ParsedLine,
+	type EschLine,
+	type EsymLine,
+	type ValidationReport,
+} from './schema';
 
 export interface PinInfo {
 	/** Pin element ID within the symbol (e.g., "e5") */
@@ -109,7 +119,9 @@ export interface ComponentPalette {
 }
 
 export interface SchematicModel {
-	/** Raw source lines (for editing) */
+	/** Parsed+typed lines (preserves raw for round-trip) */
+	parsedLines: ParsedLine<EschLine>[];
+	/** Raw source lines (derived from parsedLines; kept for API compat) */
 	lines: string[];
 	/** Parsed HEAD metadata */
 	maxId: number;
@@ -125,6 +137,10 @@ export interface SchematicModel {
 	maxGgeId: number;
 	/** Font styles defined in this schematic (id -> raw line) */
 	fontStyles: Record<string, string>;
+	/** Schema validation report for the .esch source */
+	validation: ValidationReport;
+	/** Schema validation reports for any parsed symbol sources, keyed by symbol UUID */
+	symbolValidation: Record<string, ValidationReport>;
 }
 
 function rotatePoint(sx: number, sy: number, rotationDeg: number): [number, number] {
@@ -141,44 +157,52 @@ function rotatePoint(sx: number, sy: number, rotationDeg: number): [number, numb
 /**
  * Parse a symbol .esym file to extract pin definitions.
  */
-export function parseSymbol(source: string): SymbolInfo {
-	const lines = source.split('\n').filter((l) => l.trim());
-	const parsed = lines.map((l) => JSON.parse(l));
+export function parseSymbol(source: string): { symbol: SymbolInfo; validation: ValidationReport } {
+	const { lines, report } = parseEsymSource(source);
 
-	const head = parsed.find((r) => r[0] === 'HEAD');
-	const symbolType = head?.[1]?.symbolType ?? 0;
-	const uuid = ''; // Caller sets this
+	let symbolType = 0;
+	for (const line of lines) {
+		if (line.kind !== 'known') continue;
+		if (line.data[0] !== 'HEAD') continue;
+		const meta = line.data[1] as { symbolType?: number };
+		symbolType = meta?.symbolType ?? 0;
+		break;
+	}
 
 	const pins: SymbolInfo['pins'] = [];
-	let currentPin: any = null;
+	let currentPin: SymbolInfo['pins'][number] | null = null;
 
-	for (const row of parsed) {
-		if (row[0] === 'PIN') {
+	for (const line of lines) {
+		if (line.kind !== 'known') continue;
+		const d = line.data;
+		const tag = d[0];
+
+		if (tag === 'PIN') {
 			if (currentPin) pins.push(currentPin);
 			currentPin = {
-				id: row[1],
-				x: row[4],
-				y: row[5],
-				length: row[6],
-				angle: row[7],
+				id: d[1] as string,
+				x: d[4] as number,
+				y: d[5] as number,
+				length: d[6] as number,
+				angle: d[7] as number,
 				number: '',
 				name: '',
 				pinType: '',
 			};
-		} else if (row[0] === 'ATTR' && currentPin && row[2] === currentPin.id) {
-			if (row[3] === 'NAME') currentPin.name = row[4] ?? '';
-			else if (row[3] === 'NUMBER') currentPin.number = row[4] ?? '';
-			else if (row[3] === 'Pin Type') currentPin.pinType = row[4] ?? '';
-		} else if (row[0] === 'FONTSTYLE') {
-			// Skip, doesn't end a pin
-		} else if (row[0] !== 'ATTR' && currentPin) {
+		} else if (tag === 'ATTR' && currentPin && d[2] === currentPin.id) {
+			const attrName = d[3] as string;
+			const value = d[4];
+			if (attrName === 'NAME') currentPin.name = String(value ?? '');
+			else if (attrName === 'NUMBER') currentPin.number = String(value ?? '');
+			else if (attrName === 'Pin Type') currentPin.pinType = String(value ?? '');
+		} else if (tag !== 'ATTR' && tag !== 'FONTSTYLE' && currentPin) {
 			pins.push(currentPin);
 			currentPin = null;
 		}
 	}
 	if (currentPin) pins.push(currentPin);
 
-	return { uuid, symbolType, pins };
+	return { symbol: { uuid: '', symbolType, pins }, validation: report };
 }
 
 export interface ProjectJson {
@@ -192,59 +216,57 @@ export interface ProjectJson {
  * @param symbolSources - Map of symbol UUID -> .esym file content (for pin resolution)
  * @param projectJson - Parsed project.json (for resolving device -> symbol when Symbol attr is missing)
  */
-export function parseSchematic(source: string, symbolSources?: Record<string, string>, projectJson?: ProjectJson): SchematicModel {
-	const lines = source.split('\n');
-	const parsedLines: any[][] = [];
+export function parseSchematic(
+	source: string,
+	symbolSources?: Record<string, string>,
+	projectJson?: ProjectJson,
+): SchematicModel {
+	const { lines: parsedLines, report: validation } = parseEschSource(source);
 
-	for (const line of lines) {
-		const trimmed = line.trim();
-		if (!trimmed) {
-			parsedLines.push([]);
-			continue;
-		}
-		try {
-			parsedLines.push(JSON.parse(trimmed));
-		} catch {
-			parsedLines.push([]);
-		}
+	// maxId from HEAD
+	let maxId = 0;
+	for (const line of parsedLines) {
+		if (line.kind !== 'known') continue;
+		if (line.data[0] !== 'HEAD') continue;
+		maxId = (line.data[1] as { maxId?: number })?.maxId ?? 0;
+		break;
 	}
 
-	// Parse HEAD
-	const headRow = parsedLines.find((r) => r[0] === 'HEAD');
-	const maxId = headRow?.[1]?.maxId ?? 0;
-
-	// Parse symbols if provided
+	// Parse symbols
 	const symbolCache: Record<string, SymbolInfo> = {};
+	const symbolValidation: Record<string, ValidationReport> = {};
 	if (symbolSources) {
 		for (const [uuid, src] of Object.entries(symbolSources)) {
-			const sym = parseSymbol(src);
-			sym.uuid = uuid;
-			symbolCache[uuid] = sym;
+			const { symbol, validation: vr } = parseSymbol(src);
+			symbol.uuid = uuid;
+			symbolCache[uuid] = symbol;
+			symbolValidation[uuid] = vr;
 		}
 	}
 
-	// First pass: collect font styles
+	// First pass: collect font styles (id -> raw line)
 	const fontStyles: Record<string, string> = {};
-	for (let i = 0; i < parsedLines.length; i++) {
-		const row = parsedLines[i];
-		if (row[0] === 'FONTSTYLE') {
-			fontStyles[row[1]] = lines[i];
-		}
+	for (const line of parsedLines) {
+		if (line.kind !== 'known') continue;
+		if (line.data[0] !== 'FONTSTYLE') continue;
+		fontStyles[line.data[1] as string] = line.raw;
 	}
 
-	// Second pass: collect components and their attributes
+	// Second pass: collect components and their ATTRs
 	const components: ComponentInfo[] = [];
 	const componentById: Record<string, ComponentInfo> = {};
 
-	for (const row of parsedLines) {
-		if (row[0] === 'COMPONENT') {
+	for (const line of parsedLines) {
+		if (line.kind !== 'known') continue;
+		const d = line.data;
+		if (d[0] === 'COMPONENT') {
 			const comp: ComponentInfo = {
-				elementId: row[1],
-				partName: row[2] ?? '',
-				x: row[3],
-				y: row[4],
-				rotation: row[5] ?? 0,
-				flip: row[6] ?? 0,
+				elementId: d[1] as string,
+				partName: (d[2] as string) ?? '',
+				x: d[3] as number,
+				y: d[4] as number,
+				rotation: (d[5] as number) ?? 0,
+				flip: (d[6] as number) ?? 0,
 				symbolUuid: '',
 				deviceUuid: '',
 				uniqueId: '',
@@ -257,10 +279,12 @@ export function parseSchematic(source: string, symbolSources?: Record<string, st
 			};
 			components.push(comp);
 			componentById[comp.elementId] = comp;
-		} else if (row[0] === 'ATTR' && row[2] in componentById) {
-			const comp = componentById[row[2]];
-			const key = row[3] as string;
-			const value = row[4] ?? '';
+		} else if (d[0] === 'ATTR') {
+			const parentId = d[2] as string;
+			if (!(parentId in componentById)) continue;
+			const comp = componentById[parentId];
+			const key = d[3] as string;
+			const value = d[4] ?? '';
 			comp.attrs[key] = String(value);
 
 			if (key === 'Symbol') comp.symbolUuid = String(value);
@@ -285,7 +309,7 @@ export function parseSchematic(source: string, symbolSources?: Record<string, st
 		}
 	}
 
-	// Resolve pin positions using symbol data
+	// Resolve pin world positions using symbol data
 	for (const comp of components) {
 		if (!comp.symbolUuid || !symbolCache[comp.symbolUuid]) continue;
 		const sym = symbolCache[comp.symbolUuid];
@@ -312,28 +336,33 @@ export function parseSchematic(source: string, symbolSources?: Record<string, st
 		}
 	}
 
-	// Parse wires
+	// Parse wires + their NET ATTRs
 	const wires: WireInfo[] = [];
 	const wireById: Record<string, WireInfo> = {};
 
-	for (const row of parsedLines) {
-		if (row[0] === 'WIRE') {
-			const segments: number[][] = row[2] ?? [];
+	for (const line of parsedLines) {
+		if (line.kind !== 'known') continue;
+		const d = line.data;
+		if (d[0] === 'WIRE') {
+			const segments = ((d[2] as number[][]) ?? []) as number[][];
 			const isJunction =
 				segments.length === 1 &&
 				segments[0].length === 4 &&
 				segments[0][0] === segments[0][2] &&
 				segments[0][1] === segments[0][3];
 			const wire: WireInfo = {
-				elementId: row[1],
+				elementId: d[1] as string,
 				segments,
 				netName: '',
 				isJunction,
 			};
 			wires.push(wire);
 			wireById[wire.elementId] = wire;
-		} else if (row[0] === 'ATTR' && row[2] in wireById && row[3] === 'NET') {
-			wireById[row[2]].netName = String(row[4] ?? '');
+		} else if (d[0] === 'ATTR' && d[3] === 'NET') {
+			const parentId = d[2] as string;
+			if (parentId in wireById) {
+				wireById[parentId].netName = String(d[4] ?? '');
+			}
 		}
 	}
 
@@ -346,29 +375,35 @@ export function parseSchematic(source: string, symbolSources?: Record<string, st
 		}
 	}
 
-	// Build palette by examining existing components
+	// Build palette from existing components + wires
 	const palette: ComponentPalette = {
 		powerSymbols: {},
 		components: {},
-		wireLineStyle: 'st9', // Default, will detect
+		wireLineStyle: 'st9',
 	};
+
+	// Helper: collect font styles from ATTR lines whose parent is a given element id
+	function collectFontStyles(elementId: string): Record<string, string> {
+		const fonts: Record<string, string> = {};
+		for (const line of parsedLines) {
+			if (line.kind !== 'known') continue;
+			const d = line.data;
+			if (d[0] !== 'ATTR') continue;
+			if (d[2] !== elementId) continue;
+			const fs = d[10];
+			if (typeof fs === 'string' && fs.startsWith('st')) {
+				fonts[d[3] as string] = fs;
+			}
+		}
+		return fonts;
+	}
 
 	for (const comp of components) {
 		if (comp.isNetport && !palette.netport && comp.symbolUuid && comp.deviceUuid) {
-			// Grab font styles from the first netport's attrs
-			const netportFonts: Record<string, string> = {};
-			for (const row of parsedLines) {
-				if (row[0] === 'ATTR' && row[2] === comp.elementId) {
-					const fs = row[10];
-					if (typeof fs === 'string' && fs.startsWith('st')) {
-						netportFonts[row[3]] = fs;
-					}
-				}
-			}
 			palette.netport = {
 				symbolUuid: comp.symbolUuid,
 				deviceUuid: comp.deviceUuid,
-				fontStyles: netportFonts,
+				fontStyles: collectFontStyles(comp.elementId),
 			};
 		}
 
@@ -384,28 +419,21 @@ export function parseSchematic(source: string, symbolSources?: Record<string, st
 		if (comp.partName && comp.designator && !comp.isNetport && !comp.isPowerSymbol) {
 			const basePart = comp.partName.replace(/\.\d+$/, '');
 			if (!palette.components[basePart]) {
-				const compFonts: Record<string, string> = {};
-				for (const row of parsedLines) {
-					if (row[0] === 'ATTR' && row[2] === comp.elementId) {
-						const fs = row[10];
-						if (typeof fs === 'string' && fs.startsWith('st')) {
-							compFonts[row[3]] = fs;
-						}
-					}
-				}
 				palette.components[basePart] = {
 					symbolUuid: comp.symbolUuid,
 					deviceUuid: comp.deviceUuid,
-					fontStyles: compFonts,
+					fontStyles: collectFontStyles(comp.elementId),
 				};
 			}
 		}
 	}
 
-	// Detect wire line style from existing wires
-	for (const row of parsedLines) {
-		if (row[0] === 'WIRE' && typeof row[3] === 'string') {
-			palette.wireLineStyle = row[3];
+	// Detect wire line style from the first WIRE we see
+	for (const line of parsedLines) {
+		if (line.kind !== 'known') continue;
+		const d = line.data;
+		if (d[0] === 'WIRE' && typeof d[3] === 'string') {
+			palette.wireLineStyle = d[3];
 			break;
 		}
 	}
@@ -419,8 +447,11 @@ export function parseSchematic(source: string, symbolSources?: Record<string, st
 		}
 	}
 
+	const rawLines = source.split('\n');
+
 	return {
-		lines,
+		parsedLines,
+		lines: rawLines,
 		maxId,
 		components,
 		wires,
@@ -428,5 +459,7 @@ export function parseSchematic(source: string, symbolSources?: Record<string, st
 		palette,
 		maxGgeId,
 		fontStyles,
+		validation,
+		symbolValidation,
 	};
 }
