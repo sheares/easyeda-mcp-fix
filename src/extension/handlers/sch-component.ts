@@ -1,4 +1,19 @@
-import { fetchParsedNetlist } from './sch-netlist-utils';
+import { fetchParsedNetlist, resolveTemplateExpressions, type ParsedNetlist } from './sch-netlist-utils';
+
+/**
+ * Resolve ={...} template expressions in all string fields of a component
+ * using resolved property values from the netlist.
+ */
+function resolveComponentTemplates(comp: any, netlist: ParsedNetlist): void {
+	if (!comp?.uniqueId) return;
+	const entry = netlist[comp.uniqueId];
+	if (!entry) return;
+	for (const key of Object.keys(comp)) {
+		if (typeof comp[key] === 'string' && comp[key].includes('={')) {
+			comp[key] = resolveTemplateExpressions(comp[key], entry.allProps);
+		}
+	}
+}
 
 // Known-good library UUIDs for net flags and net ports.
 // EasyEDA Pro's createNetFlag/createNetPort internally fetch the symbol definition
@@ -113,11 +128,28 @@ export const schComponentHandlers: Record<string, (params: Record<string, any>) 
 	},
 
 	'sch.component.get': async (params) => {
-		return eda.sch_PrimitiveComponent.get(params.primitiveIds);
+		const [components, netlist] = await Promise.all([
+			eda.sch_PrimitiveComponent.get(params.primitiveIds),
+			fetchParsedNetlist(),
+		]);
+		const arr = Array.isArray(components) ? components : components ? [components] : [];
+		for (const comp of arr) {
+			resolveComponentTemplates(comp, netlist);
+		}
+		return components;
 	},
 
 	'sch.component.getAll': async (params) => {
-		return eda.sch_PrimitiveComponent.getAll(params.componentType, params.allSchematicPages);
+		const [components, netlist] = await Promise.all([
+			eda.sch_PrimitiveComponent.getAll(params.componentType, params.allSchematicPages),
+			fetchParsedNetlist(),
+		]);
+		if (Array.isArray(components)) {
+			for (const comp of components) {
+				resolveComponentTemplates(comp, netlist);
+			}
+		}
+		return components;
 	},
 
 	'sch.component.getAllPins': async (params) => {

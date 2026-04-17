@@ -7,8 +7,10 @@ export function registerSchReadTools(server: McpServer, bridge: WebSocketBridge)
 	server.tool(
 		'sch_get_all_components',
 		`Get all components in the schematic with their properties, positions, rotations, designators, etc.
-Fields: primitiveId, componentType, designator, name, x, y, rotation, mirror, addIntoBom, addIntoPcb, footprint, manufacturer, net, otherProperty.
-Note: name often contains EasyEDA template expressions like ={Manufacturer Part} rather than resolved values. For resolved names, use sch_get_connectivity.`,
+To identify what a component is, check: designator (e.g. "R1", "U3"), name (part name/number), manufacturer, manufacturerId (manufacturer part number), supplier, supplierId (supplier part number, e.g. JLCPCB/LCSC number), and footprint.
+All fields: primitiveId, componentType, designator, name, x, y, rotation, mirror, addIntoBom, addIntoPcb, footprint, manufacturer, manufacturerId, supplier, supplierId, net, otherProperty.
+otherProperty contains user-defined custom attributes — contents vary per component.
+Template expressions like ={Manufacturer Part} are automatically resolved to their actual values.`,
 		withQueryParams({
 			componentType: z
 				.enum(['part', 'sheet', 'netflag', 'netport', 'nonElectrical_symbol', 'short_symbol', 'netlabel'])

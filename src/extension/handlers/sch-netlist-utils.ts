@@ -2,6 +2,7 @@ export interface ParsedNetlistComponent {
 	designator: string;
 	part: string;
 	manufacturerPart: string;
+	allProps: Record<string, any>; // all raw properties from the netlist
 	pins: Record<string, string>; // pinNumber → netName
 }
 
@@ -19,10 +20,22 @@ export async function fetchParsedNetlist(): Promise<ParsedNetlist> {
 			designator: props.Designator || '',
 			part: props.Name || '',
 			manufacturerPart: props['Manufacturer Part'] || '',
+			allProps: props,
 			pins: entry.pins || {},
 		};
 	}
 	return result;
+}
+
+/**
+ * Resolve EasyEDA template expressions like `={Manufacturer Part}` in a string
+ * by looking up property values from the netlist.
+ */
+export function resolveTemplateExpressions(text: string, props: Record<string, any>): string {
+	return text.replace(/=\{([^}]+)\}/g, (match, propName) => {
+		const value = props[propName];
+		return value != null ? String(value) : match;
+	});
 }
 
 export async function fetchPinNames(primitiveId: string): Promise<Record<string, string>> {
