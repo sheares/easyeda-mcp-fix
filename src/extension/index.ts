@@ -70,7 +70,7 @@ export async function about(): Promise<void> {
 	// Get current theme so the dialog can match
 	let theme = 'light';
 	try {
-		theme = await eda.sys_System.getCurrentTheme();
+		theme = await eda.sys_Window.getCurrentTheme();
 	} catch {
 		// Default to light if API unavailable
 	}
