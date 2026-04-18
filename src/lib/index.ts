@@ -4,3 +4,14 @@ export { SchematicWriter } from './schematic-writer';
 export { loadSchematic, listSchematics } from './loader';
 export type { LoadedSchematic } from './loader';
 export * as schema from './schema';
+export {
+	shapeFromSymbol,
+	shapeFromSymbolSource,
+	transformShape,
+	computeBoundingBox,
+	boundingBoxesOverlap,
+	polygonContainsPoint,
+	polygonsOverlap,
+	shapesOverlap,
+} from './geometry';
+export type { Polygon, Shape, BoundingBox, InstanceTransform, SymbolShapeOptions } from './geometry';
