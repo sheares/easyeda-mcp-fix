@@ -16,3 +16,26 @@ export const WireLine = z.tuple([
 ]).rest(z.unknown());
 
 export type WireLine = z.infer<typeof WireLine>;
+
+/** Constructor args for `makeWireLine`. */
+export interface WireLineArgs {
+	elementId: string;
+	segments: number[][];
+	lineStyleId: string;
+	layer?: number;
+}
+
+/**
+ * Build a typed WIRE tuple. See ComponentLineArgs / makeComponentLine docs
+ * for the rationale behind the `z.input<typeof …>` cast.
+ */
+export function makeWireLine(args: WireLineArgs): WireLine {
+	const tuple: z.input<typeof WireLine> = [
+		'WIRE',
+		args.elementId,
+		args.segments,
+		args.lineStyleId,
+		args.layer ?? 0,
+	];
+	return WireLine.parse(tuple);
+}

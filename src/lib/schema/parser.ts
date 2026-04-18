@@ -174,3 +174,16 @@ export function serializeParsedLines<L>(lines: ParsedLine<L>[]): string {
 	}
 	return out.join('\n');
 }
+
+/**
+ * Wrap a freshly-built (writer-side) line tuple as a ParsedLine. Marks
+ * mutated:true so the serializer re-stringifies from `data` rather than
+ * looking at `raw`. lineIndex=-1 signals "not from the source document".
+ *
+ * Use the per-tag factories (e.g. makeComponentLine) to build `data` first;
+ * this helper is the boundary between "validated tuple" and "ready to add
+ * to a ParsedLine[] stream".
+ */
+export function wrapAsParsedLine<L>(data: L): ParsedLine<L> {
+	return { kind: 'known', data, raw: JSON.stringify(data), lineIndex: -1, mutated: true };
+}

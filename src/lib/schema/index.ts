@@ -8,6 +8,7 @@
  */
 
 export * from './types';
+export { wrapAsParsedLine, serializeParsedLines } from './parser';
 export * from './line-head';
 export * from './line-component';
 export * from './line-attr';

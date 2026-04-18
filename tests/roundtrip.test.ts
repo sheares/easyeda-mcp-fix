@@ -10,6 +10,12 @@ import {
 	serializeEschLines,
 	serializeEpcbLines,
 	serializeEinsLines,
+	makeComponentLine,
+	makeAttrLine,
+	makeWireLine,
+	wrapAsParsedLine,
+	type ParsedLine,
+	type EschLine,
 } from '../src/lib/schema';
 import { parseSchematic } from '../src/lib/schematic-reader';
 import { SchematicWriter } from '../src/lib/schematic-writer';
@@ -154,4 +160,104 @@ test('.eins parses with zero unknowns and zero invalids', () => {
 test('.eins round-trips byte-identically when no mutations are made', () => {
 	const { lines } = parseEinsSource(EINS_FIXTURE);
 	assert.equal(serializeEinsLines(lines), EINS_FIXTURE);
+});
+
+// ---------------------------------------------------------------------------
+// Public line factories — tightly-typed tuple builders.
+// Single source of truth: the schema. Position mistakes become tsc errors;
+// .parse() is the runtime backstop.
+// ---------------------------------------------------------------------------
+
+test('makeComponentLine builds a validated tuple with defaults', () => {
+	const line = makeComponentLine({
+		elementId: 'eTEST',
+		partName: 'R_0402.1',
+		x: 100,
+		y: 200,
+		rotation: 90,
+	});
+	assert.equal(line[0], 'COMPONENT');
+	assert.equal(line[1], 'eTEST');
+	assert.equal(line[2], 'R_0402.1');
+	assert.equal(line[3], 100);
+	assert.equal(line[4], 200);
+	assert.equal(line[5], 90);
+	assert.equal(line[6], 0, 'flip defaults to 0');
+	assert.deepEqual(line[7], {}, 'options defaults to {}');
+	assert.equal(line[8], 0, 'layer defaults to 0');
+});
+
+test('makeComponentLine .parse() rejects bad runtime input', () => {
+	// At compile time z.input<typeof ComponentLine> would catch this; if a
+	// caller bypasses TS (e.g. JS, or `as any`) the runtime parse still fires.
+	assert.throws(
+		() => makeComponentLine({
+			elementId: 'eTEST',
+			partName: 'R',
+			x: 'not-a-number' as unknown as number,
+			y: 0,
+			rotation: 0,
+		}),
+		/Invalid input|expected number/i,
+	);
+});
+
+test('makeAttrLine builds an ATTR with the documented field positions', () => {
+	const line = makeAttrLine({
+		elementId: 'eA1',
+		parentId: 'eC1',
+		attrName: 'Designator',
+		value: 'R25',
+		visible: 1,
+		x: 10,
+		y: 20,
+		fontStyleId: 'st4',
+		layer: 0,
+	});
+	assert.equal(line[0], 'ATTR');
+	assert.equal(line[1], 'eA1');
+	assert.equal(line[2], 'eC1');
+	assert.equal(line[3], 'Designator');
+	assert.equal(line[4], 'R25');
+	assert.equal(line[6], 1);  // visible at position 6
+	assert.equal(line[7], 10); // x override at position 7
+	assert.equal(line[8], 20); // y override at position 8
+	assert.equal(line[10], 'st4');
+	assert.equal(line[11], 0);
+});
+
+test('makeWireLine builds a junction wire that round-trips through serialize', () => {
+	const line = makeWireLine({
+		elementId: 'eW1',
+		segments: [[100, 200, 100, 200]],
+		lineStyleId: 'st9',
+	});
+	assert.equal(line[0], 'WIRE');
+	assert.equal(line[1], 'eW1');
+	assert.deepEqual(line[2], [[100, 200, 100, 200]]);
+	assert.equal(line[3], 'st9');
+	assert.equal(line[4], 0);
+
+	const wrapped = wrapAsParsedLine<EschLine>(line);
+	assert.equal(wrapped.kind, 'known');
+	assert.equal(wrapped.mutated, true);
+	assert.equal(wrapped.lineIndex, -1);
+	const serialized = serializeEschLines([wrapped]);
+	assert.equal(serialized, JSON.stringify(line));
+});
+
+// ---------------------------------------------------------------------------
+// SchematicWriter.validate() — final sanity check before upload.
+// ---------------------------------------------------------------------------
+
+test('SchematicWriter.validate() returns a clean report after mutations', () => {
+	const model = parseSchematic(ESCH_FIXTURE, { 'sym-resistor-uuid': ESYM_FIXTURE });
+	const writer = new SchematicWriter(ESCH_FIXTURE, model);
+	(writer as any).allocId();
+	(writer as any).allocId();
+	const report = writer.validate();
+	assert.equal(report.docType, 'esch');
+	assert.equal(report.unknownTagCount, 0);
+	assert.equal(report.invalidCount, 0);
+	assert.ok(report.knownCount > 0);
 });

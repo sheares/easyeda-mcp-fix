@@ -20,91 +20,34 @@
 
 import { SchematicModel, ComponentInfo, PinInfo } from './schematic-reader';
 import {
-	AttrLine,
-	ComponentLine,
 	EschLine,
 	HeadLine,
-	WireLine,
+	makeComponentLine as buildComponentTuple,
+	makeAttrLine as buildAttrTuple,
+	makeWireLine as buildWireTuple,
+	parseEschSource,
 	serializeEschLines,
+	wrapAsParsedLine,
+	type ComponentLineArgs,
+	type AttrLineArgs,
+	type WireLineArgs,
 	type ParsedLine,
+	type ValidationReport,
 } from './schema';
 
-function makeLine<L>(data: L): ParsedLine<L> {
-	return { kind: 'known', data, raw: JSON.stringify(data), lineIndex: -1, mutated: true };
-}
-
-function makeComponentLine(args: {
-	elementId: string;
-	partName: string;
-	x: number;
-	y: number;
-	rotation: number;
-	flip?: number;
-	options?: Record<string, unknown>;
-	layer?: number;
-}): ParsedLine<EschLine> {
-	const tuple: unknown = [
-		'COMPONENT',
-		args.elementId,
-		args.partName,
-		args.x,
-		args.y,
-		args.rotation,
-		args.flip ?? 0,
-		args.options ?? {},
-		args.layer ?? 0,
-	];
-	const validated = ComponentLine.parse(tuple);
-	return makeLine<EschLine>(validated);
-}
-
-function makeAttrLine(args: {
-	elementId: string;
-	parentId: string;
-	attrName: string;
-	value: unknown;
-	visible?: unknown;
-	x?: unknown;
-	y?: unknown;
-	fontStyleId: string | null;
-	layer?: number;
-	trailingSlot5?: unknown;  // position 5 — typically null
-	trailingSlot9?: unknown;  // position 9 — sometimes rotation, sometimes null
-}): ParsedLine<EschLine> {
-	const tuple: unknown = [
-		'ATTR',
-		args.elementId,
-		args.parentId,
-		args.attrName,
-		args.value,
-		args.trailingSlot5 ?? null,
-		args.visible ?? null,
-		args.x ?? null,
-		args.y ?? null,
-		args.trailingSlot9 ?? null,
-		args.fontStyleId,
-		args.layer ?? 0,
-	];
-	const validated = AttrLine.parse(tuple);
-	return makeLine<EschLine>(validated);
-}
-
-function makeWireLine(args: {
-	elementId: string;
-	segments: number[][];
-	lineStyleId: string;
-	layer?: number;
-}): ParsedLine<EschLine> {
-	const tuple: unknown = [
-		'WIRE',
-		args.elementId,
-		args.segments,
-		args.lineStyleId,
-		args.layer ?? 0,
-	];
-	const validated = WireLine.parse(tuple);
-	return makeLine<EschLine>(validated);
-}
+/**
+ * Local wrappers that adapt the public schema factories (which return bare
+ * validated tuples) to the writer's `ParsedLine<EschLine>[]` stream. Kept
+ * inline so `appendedLines.push(makeXxxLine({...}))` reads naturally at the
+ * call sites. Type errors at construction time bubble up from the underlying
+ * factories' `z.input<typeof XLine>` casts.
+ */
+const makeComponentLine = (args: ComponentLineArgs): ParsedLine<EschLine> =>
+	wrapAsParsedLine<EschLine>(buildComponentTuple(args));
+const makeAttrLine = (args: AttrLineArgs): ParsedLine<EschLine> =>
+	wrapAsParsedLine<EschLine>(buildAttrTuple(args));
+const makeWireLine = (args: WireLineArgs): ParsedLine<EschLine> =>
+	wrapAsParsedLine<EschLine>(buildWireTuple(args));
 
 export class SchematicWriter {
 	private model: SchematicModel;
@@ -537,6 +480,20 @@ export class SchematicWriter {
 			? '\n' + serializeEschLines(this.appendedLines)
 			: '';
 		return original + appended;
+	}
+
+	/**
+	 * Run the .esch schema validator on the writer's current serialized output.
+	 *
+	 * Each new line built via the writer is already validated at construction
+	 * time by the underlying schema factories — so a clean report here mostly
+	 * confirms that mutations to existing lines (HEAD.maxId, removeElement)
+	 * didn't break anything. Useful as a final pre-upload sanity check before
+	 * pushing the source back to EasyEDA via document_set_source.
+	 */
+	validate(): ValidationReport {
+		const { report } = parseEschSource(this.serialize());
+		return report;
 	}
 }
 
