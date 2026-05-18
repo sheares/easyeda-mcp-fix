@@ -15,3 +15,4 @@ export {
 	shapesOverlap,
 } from './geometry';
 export type { Polygon, Shape, BoundingBox, InstanceTransform, SymbolShapeOptions } from './geometry';
+export * as symbol from './symbol';
