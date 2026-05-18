@@ -161,6 +161,9 @@ const toolContext: ToolContext = {
 	isConnected: () => extensions.size > 0,
 	getPort: () => wsPort(),
 	refreshAllInstanceInfo,
+	requestRestart: (delayMs = 100) => {
+		setTimeout(() => shutdown(0), delayMs).unref();
+	},
 };
 
 // Build registry up front so list_tools is cheap.

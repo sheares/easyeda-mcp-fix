@@ -62,4 +62,11 @@ export interface ToolContext {
 
 	/** Force a fresh poll of every extension's instance.getInfo. */
 	refreshAllInstanceInfo(): Promise<void>;
+
+	/**
+	 * Schedule a daemon shutdown. The current request will complete (response
+	 * flushes to UDS) before exit. MCP server proxies will reconnect, respawning
+	 * a fresh daemon on demand.
+	 */
+	requestRestart(delayMs?: number): void;
 }

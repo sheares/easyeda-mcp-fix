@@ -243,6 +243,7 @@ test('daemon advertises a non-empty tool list including server_info + list_insta
 		const names = new Set(res.tools.map((t: any) => t.name));
 		assert.ok(names.has('server_info'), 'server_info should be advertised');
 		assert.ok(names.has('list_instances'), 'list_instances should be advertised');
+		assert.ok(names.has('bridge_restart'), 'bridge_restart should be advertised');
 		await client.close();
 	} finally {
 		await h.cleanup();
@@ -429,6 +430,32 @@ test('idle exit: daemon exits ~N seconds after last MCP client disconnects', asy
 			h.daemon.once('exit', () => { clearTimeout(timer); resolve(true); });
 		});
 		assert.equal(exited, true, 'daemon should exit within 4s after last client disconnects');
+	} finally {
+		await h.cleanup();
+	}
+});
+
+test('bridge_restart returns a response, then the daemon exits', async () => {
+	const h = await startDaemon();
+	try {
+		const client = new MockMcpClient(h.sockPath);
+		await client.ready();
+
+		const res = await client.callTool('bridge_restart', { reason: 'unit test' });
+		assert.equal(res.kind, 'call_tool_result');
+		assert.equal(res.error, undefined);
+		// Response payload travels in result.content[0].text as a JSON string.
+		const payload = JSON.parse(res.result?.content?.[0]?.text ?? '{}');
+		assert.equal(payload.ok, true);
+		assert.equal(typeof payload.pidWas, 'number');
+		assert.match(payload.message, /respawn/);
+
+		// Daemon should exit within ~1s of the response (handler schedules +100ms).
+		const exited = await new Promise<boolean>((resolve) => {
+			const timer = setTimeout(() => resolve(false), 2000);
+			h.daemon.once('exit', () => { clearTimeout(timer); resolve(true); });
+		});
+		assert.equal(exited, true, 'daemon should exit after bridge_restart');
 	} finally {
 		await h.cleanup();
 	}
