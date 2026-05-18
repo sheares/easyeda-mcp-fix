@@ -25,6 +25,25 @@ async function exportFile(file: File | undefined): Promise<{ fileName: string; d
 	return { fileName: file.name, data, size: file.size };
 }
 
+// Standard fab-layer types we want included by default when no explicit
+// `layers` list is supplied. Without this, EasyEDA's getGerberFile /
+// getOpenDatabaseDoublePlusFile only emit Top+Bottom copper — inner copper
+// layers go missing even on 4L+ boards.
+const DEFAULT_FAB_LAYER_TYPES = new Set([
+	'TOP', 'BOTTOM', 'SIGNAL', // copper (SIGNAL = Inner1..InnerN)
+	'TOP_SILK', 'BOT_SILK',
+	'TOP_SOLDER_MASK', 'BOT_SOLDER_MASK',
+	'TOP_PASTE_MASK', 'BOT_PASTE_MASK',
+	'OUTLINE',
+]);
+
+async function defaultEnabledFabLayers(mirrorKey: 'isMirror' | 'mirror'): Promise<Array<Record<string, unknown>>> {
+	const all = (await eda.pcb_Layer.getAllLayers()) as Array<{ id: number; type: string; layerStatus: number }>;
+	return all
+		.filter((l) => l.layerStatus === 1 && DEFAULT_FAB_LAYER_TYPES.has(l.type))
+		.map((l) => ({ layerId: l.id, [mirrorKey]: false }));
+}
+
 export const manufactureHandlers: Record<string, (params: Record<string, any>) => Promise<any>> = {
 	// === Export ===
 
@@ -44,13 +63,14 @@ export const manufactureHandlers: Record<string, (params: Record<string, any>) =
 	},
 
 	'pcb.manufacture.getGerberFile': async (params) => {
+		const layers = params.layers ?? (await defaultEnabledFabLayers('isMirror'));
 		const file = await eda.pcb_ManufactureData.getGerberFile(
 			params.fileName,
 			params.colorSilkscreen,
 			params.unit,
 			params.digitalFormat,
 			params.other,
-			params.layers,
+			layers,
 			params.objects,
 		);
 		return exportFile(file);
@@ -115,11 +135,12 @@ export const manufactureHandlers: Record<string, (params: Record<string, any>) =
 	},
 
 	'pcb.manufacture.getOpenDatabaseDoublePlusFile': async (params) => {
+		const layers = params.layers ?? (await defaultEnabledFabLayers('mirror'));
 		const file = await eda.pcb_ManufactureData.getOpenDatabaseDoublePlusFile(
 			params.fileName,
 			params.unit,
 			params.otherData,
-			params.layers,
+			layers,
 			params.objects,
 		);
 		return exportFile(file);

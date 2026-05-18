@@ -46,7 +46,10 @@ getXxxFile call. Common ones (unit values are the literal strings "mm" / "inch" 
   3d:            { element: [...], modelMode: "Outfit" | "Parts", autoGenerateModels }
   bom:           { template, filterOptions, statistics, property, columns }
   dxf:           { layers: [{layerId, mirror}], objects: [...] }
-Omit options to get the JLCPCB-style defaults the EasyEDA UI uses.
+Omit options to get sensible defaults. For gerber and odbplus, omitting \`layers\` exports
+all enabled copper (Top, Bottom, and any Inner1..InnerN that are enabled) plus the standard
+silk/mask/paste/outline aux layers — unlike EasyEDA's raw default which silently drops inner
+copper even on 4L+ boards.
 
 CAUTION: options keys cannot override the top-level document/instance_id routing fields —
 those always take precedence to prevent accidental cross-document export.`;
