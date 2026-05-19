@@ -37,6 +37,13 @@ import { ToolRegistry } from './registry';
 const ALLOWED_ORIGIN_PATTERNS = [
 	/^https?:\/\/([a-z0-9-]+\.)*easyeda\.com(:\d+)?$/,
 	/^https?:\/\/([a-z0-9-]+\.)*lceda\.cn(:\d+)?$/,
+	// EasyEDA Pro desktop app (Electron). Renderer is loaded from the fake
+	// scheme/host https://client (visible as `https_client_0.indexeddb` in
+	// ~/.config/EasyEDA-Pro/cache.arm64.3/IndexedDB/). The UA is identifiable
+	// (`EasyEDAPro/<version> ... Electron/<version>`) but we can't see UAs in
+	// verifyClient cheaply; the bare `https://client` origin is a hardcoded
+	// Electron-only string with no path/port, so accepting it exactly is safe.
+	/^https:\/\/client$/,
 ];
 
 function isAllowedOrigin(origin: string | undefined): boolean {
@@ -332,9 +339,11 @@ function startWebSocketServer(): Promise<void> {
 			port,
 			host: '127.0.0.1',
 			verifyClient: (info: { origin: string; req: IncomingMessage; secure: boolean }) => {
-				if (isAllowedOrigin(info.origin)) return true;
-				log(`Rejected WS connection from origin: ${info.origin || '(none)'}`);
-				return false;
+				const remote = info.req.socket.remoteAddress ?? '?';
+				const ua = info.req.headers['user-agent'] ?? '?';
+				const allowed = isAllowedOrigin(info.origin);
+				log(`WS handshake: origin=${info.origin || '(none)'} remote=${remote} ua=${ua} -> ${allowed ? 'accepted' : 'rejected'}`);
+				return allowed;
 			},
 		});
 
