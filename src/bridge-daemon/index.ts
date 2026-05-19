@@ -20,6 +20,7 @@ import { WebSocketServer, WebSocket } from 'ws';
 import type { IncomingMessage } from 'http';
 import { createServer as createNetServer, type Socket as NetSocket } from 'node:net';
 import { mkdir, unlink, writeFile } from 'node:fs/promises';
+import { statSync } from 'node:fs';
 import { createConnection } from 'node:net';
 import { randomBytes } from 'node:crypto';
 import {
@@ -444,11 +445,70 @@ function startUdsServer(sockPath: string): Promise<void> {
 		server.on('error', (err) => reject(err));
 		server.listen(sockPath, () => {
 			log(`UDS listening at ${sockPath}`);
+			startUdsFileMonitor(sockPath);
 			resolve();
 		});
 
 		uds = server;
 	});
+}
+
+// Safety net: if our UDS file gets unlinked (or replaced) out from under us,
+// new clients can no longer reach us via the well-known path. The process is
+// still alive holding the WS port, so a fresh daemon spawn would EADDRINUSE
+// and crash, leaving the system wedged. Detect the situation and exit so a
+// new daemon can bind cleanly.
+//
+// 5s polling cadence + 1s grace before exit caps thrash if something is
+// actively deleting the file in a loop.
+//
+// Key is dev:ino, not ino alone — ino is only unique within a filesystem, so if
+// the state dir ever lives on a different mount than something with a colliding
+// inode number, bare ino comparison could spuriously match.
+let udsInodeKey: string | null = null;
+let udsMonitorInterval: ReturnType<typeof setInterval> | null = null;
+let udsMonitorExitTimer: ReturnType<typeof setTimeout> | null = null;
+
+function startUdsFileMonitor(sockPath: string): void {
+	try {
+		const st = statSync(sockPath);
+		udsInodeKey = `${st.dev}:${st.ino}`;
+	} catch (err) {
+		log('UDS monitor: initial stat failed, skipping monitor:', err);
+		return;
+	}
+
+	udsMonitorInterval = setInterval(() => {
+		if (shuttingDown || udsMonitorExitTimer) return;
+		let currentKey: string | null = null;
+		try {
+			const st = statSync(sockPath);
+			currentKey = `${st.dev}:${st.ino}`;
+		} catch {
+			currentKey = null;
+		}
+		if (currentKey === udsInodeKey) return;
+
+		log(
+			`UDS file at ${sockPath} disappeared or replaced ` +
+			`(expected inode ${udsInodeKey}, found ${currentKey ?? 'missing'}). ` +
+			`Self-terminating in 1s so a fresh daemon can take over.`,
+		);
+		udsMonitorExitTimer = setTimeout(() => shutdown(2), 1000);
+		udsMonitorExitTimer.unref();
+	}, 5000);
+	udsMonitorInterval.unref();
+}
+
+function stopUdsFileMonitor(): void {
+	if (udsMonitorInterval) {
+		clearInterval(udsMonitorInterval);
+		udsMonitorInterval = null;
+	}
+	if (udsMonitorExitTimer) {
+		clearTimeout(udsMonitorExitTimer);
+		udsMonitorExitTimer = null;
+	}
 }
 
 async function bindUdsWithSingletonCheck(): Promise<void> {
@@ -496,6 +556,8 @@ let shuttingDown = false;
 function shutdown(code: number): void {
 	if (shuttingDown) return;
 	shuttingDown = true;
+
+	stopUdsFileMonitor();
 
 	for (const ext of extensions.values()) {
 		try {

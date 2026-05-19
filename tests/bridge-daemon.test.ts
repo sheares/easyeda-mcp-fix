@@ -12,7 +12,7 @@ import { test } from 'node:test';
 import * as assert from 'node:assert/strict';
 import { spawn, type ChildProcess } from 'node:child_process';
 import { createConnection, type Socket as NetSocket } from 'node:net';
-import { mkdtemp, rm, access } from 'node:fs/promises';
+import { mkdtemp, rm, access, unlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve as resolvePath } from 'node:path';
 import { WebSocket } from 'ws';
@@ -480,6 +480,42 @@ test('extension disconnect mid-call surfaces an error, not a hang', async () => 
 		assert.match(res.error || '', /disconnected/);
 
 		await client.close();
+	} finally {
+		await h.cleanup();
+	}
+});
+
+// UDS monitor: 5s poll + 1s grace. Allow a generous 10s window for the daemon
+// to notice the file change and exit. Skipped under CI fast-mode if env says so.
+async function waitForExit(daemon: ChildProcess, timeoutMs: number): Promise<number | null> {
+	return new Promise((resolve) => {
+		if (daemon.exitCode !== null) return resolve(daemon.exitCode);
+		const timer = setTimeout(() => resolve(null), timeoutMs);
+		daemon.once('exit', (code) => { clearTimeout(timer); resolve(code); });
+	});
+}
+
+test('UDS monitor: daemon self-terminates when its socket file is unlinked', async () => {
+	const h = await startDaemon();
+	try {
+		await unlink(h.sockPath);
+		const code = await waitForExit(h.daemon, 10000);
+		assert.equal(code, 2, `daemon should exit with code 2 when its UDS file disappears, got ${code}`);
+	} finally {
+		await h.cleanup();
+	}
+});
+
+test('UDS monitor: daemon self-terminates when its socket file is replaced with a different inode', async () => {
+	const h = await startDaemon();
+	try {
+		// Swap the live socket for a regular file at the same path so the inode
+		// changes but the path still resolves — verifies dev:ino comparison, not
+		// just existence.
+		await unlink(h.sockPath);
+		await writeFile(h.sockPath, '');
+		const code = await waitForExit(h.daemon, 10000);
+		assert.equal(code, 2, `daemon should exit with code 2 when its UDS file is replaced, got ${code}`);
 	} finally {
 		await h.cleanup();
 	}
