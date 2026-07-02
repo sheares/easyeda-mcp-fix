@@ -14,13 +14,37 @@ import { createConnection, type Socket } from 'node:net';
 import { ensureDaemonRunning } from '../bridge-daemon/spawn';
 import {
 	socketPath,
+	callToolTimeoutMs,
 	type ClientToDaemon,
 	type DaemonToClient,
 	type ToolDescriptor,
 	type CallToolResult,
 } from '../bridge-daemon/protocol';
 
-const REQUEST_TIMEOUT_MS = 45000;
+const LIST_TOOLS_TIMEOUT_MS = 45000;
+// Must strictly exceed the daemon's worst-case per-call budget (see
+// protocol.ts). If the proxy times out first, the daemon still completes the
+// operation and a model retry would execute a destructive op twice.
+const CALL_TOOL_TIMEOUT_MS = callToolTimeoutMs();
+
+/**
+ * Transport-level failure between proxy and daemon. `requestSent` says
+ * whether the request had already left the process when the failure hit:
+ * a request that was never sent is always safe to retry; one that was sent
+ * may have executed on the daemon, so non-idempotent calls must NOT be
+ * retried automatically.
+ *
+ * Detection is by instanceof, deliberately not by message substring — the
+ * daemon's own application errors ("EDA Pro Extension is not connected...")
+ * contain phrases that a substring match would misclassify as transport
+ * failures, triggering spurious retries.
+ */
+export class DaemonConnectionError extends Error {
+	constructor(message: string, readonly requestSent: boolean) {
+		super(message);
+		this.name = 'DaemonConnectionError';
+	}
+}
 
 interface PendingListTools {
 	resolve: (tools: ToolDescriptor[]) => void;
@@ -90,7 +114,7 @@ export class ProxyClient {
 		this.connected = false;
 		this.sock = null;
 		this.buffer = '';
-		const err = new Error('Bridge daemon disconnected');
+		const err = new DaemonConnectionError('Bridge daemon disconnected', true);
 		for (const [id, p] of this.pendingList) {
 			clearTimeout(p.timer);
 			p.reject(err);
@@ -175,7 +199,7 @@ export class ProxyClient {
 
 	private sendMessage(msg: ClientToDaemon): void {
 		if (!this.sock || !this.connected) {
-			throw new Error('Bridge daemon not connected');
+			throw new DaemonConnectionError('Bridge daemon not connected', false);
 		}
 		this.sock.write(JSON.stringify(msg) + '\n');
 	}
@@ -188,7 +212,9 @@ export class ProxyClient {
 		try {
 			return await this.listToolsOnce();
 		} catch (err: any) {
-			if (this.isDisconnectError(err)) {
+			// list_tools is idempotent, so retrying after a transport failure
+			// is always safe regardless of whether the request was sent.
+			if (err instanceof DaemonConnectionError) {
 				await this.connect();
 				for (const cb of this.reconnectListeners) cb();
 				return this.listToolsOnce();
@@ -203,7 +229,7 @@ export class ProxyClient {
 			const timer = setTimeout(() => {
 				this.pendingList.delete(id);
 				reject(new Error('list_tools timed out'));
-			}, REQUEST_TIMEOUT_MS);
+			}, LIST_TOOLS_TIMEOUT_MS);
 			this.pendingList.set(id, { resolve, reject, timer });
 			try {
 				this.sendMessage({ kind: 'list_tools', id });
@@ -216,16 +242,25 @@ export class ProxyClient {
 	}
 
 	/**
-	 * Forward a tool call. Auto-reconnects+respawns on disconnect (single retry).
+	 * Forward a tool call. If the daemon wasn't connected yet (request never
+	 * sent), reconnect+respawn and retry once — that's always safe. If the
+	 * connection dropped AFTER the request was sent, do NOT retry: the daemon
+	 * may have executed the (possibly destructive) operation, so surface the
+	 * uncertainty to the caller instead of silently running it twice.
 	 */
 	async callTool(name: string, args: Record<string, unknown>): Promise<CallToolResult> {
 		try {
 			return await this.callToolOnce(name, args);
 		} catch (err: any) {
-			if (this.isDisconnectError(err)) {
-				await this.connect();
-				for (const cb of this.reconnectListeners) cb();
-				return this.callToolOnce(name, args);
+			if (err instanceof DaemonConnectionError) {
+				if (!err.requestSent) {
+					await this.connect();
+					for (const cb of this.reconnectListeners) cb();
+					return this.callToolOnce(name, args);
+				}
+				throw new Error(
+					`Bridge daemon disconnected while "${name}" was in flight. The operation may or may not have completed — verify the current state (e.g. re-read the affected document) before retrying.`,
+				);
 			}
 			throw err;
 		}
@@ -236,8 +271,10 @@ export class ProxyClient {
 		return new Promise((resolve, reject) => {
 			const timer = setTimeout(() => {
 				this.pendingCall.delete(id);
-				reject(new Error(`call_tool timed out: ${name}`));
-			}, REQUEST_TIMEOUT_MS);
+				reject(new Error(
+					`call_tool timed out after ${CALL_TOOL_TIMEOUT_MS}ms: ${name}. The daemon may still complete the operation — verify state before retrying.`,
+				));
+			}, CALL_TOOL_TIMEOUT_MS);
 			this.pendingCall.set(id, { resolve, reject, timer });
 			try {
 				this.sendMessage({ kind: 'call_tool', id, name, arguments: args });
@@ -247,11 +284,6 @@ export class ProxyClient {
 				reject(err as Error);
 			}
 		});
-	}
-
-	private isDisconnectError(err: unknown): boolean {
-		const msg = err instanceof Error ? err.message : String(err);
-		return msg.includes('Bridge daemon disconnected') || msg.includes('not connected');
 	}
 
 	/** Register a callback fired after the proxy reconnects to a new daemon. */

@@ -28,6 +28,29 @@ export function wsPort(): number {
 	return Number(process.env.EDA_WS_PORT) || DEFAULT_WS_PORT;
 }
 
+// Timeout for a single extension RPC round-trip inside the daemon.
+// Multi-page netlist queries on large schematics can exceed the default;
+// override with EDA_REQUEST_TIMEOUT_MS (EASYEDA_REQUEST_TIMEOUT_MS is
+// accepted as an alias). Shared here so the MCP-server proxy can size its
+// own call_tool timeout to STRICTLY EXCEED the daemon's worst-case budget —
+// if the proxy gave up first, the daemon would still complete the (possibly
+// destructive) operation and a model retry would execute it twice.
+export const DEFAULT_EXTENSION_REQUEST_TIMEOUT_MS = 45000;
+export function extensionRequestTimeoutMs(): number {
+	const raw = process.env.EDA_REQUEST_TIMEOUT_MS ?? process.env.EASYEDA_REQUEST_TIMEOUT_MS;
+	if (!raw) return DEFAULT_EXTENSION_REQUEST_TIMEOUT_MS;
+	const parsed = Number(raw);
+	if (!Number.isFinite(parsed) || parsed <= 0) return DEFAULT_EXTENSION_REQUEST_TIMEOUT_MS;
+	return parsed;
+}
+
+// Worst case for one tool call daemon-side: up to three extension RPCs
+// (e.g. document_set_source: context fetch + backup fetch + write) plus git
+// work. The proxy must outlast that.
+export function callToolTimeoutMs(): number {
+	return extensionRequestTimeoutMs() * 3 + 30000;
+}
+
 // Idle exit: daemon exits this many seconds after the last MCP client
 // disconnects. Extension connections do NOT count toward idle — when no MCP
 // client is talking, there's nothing for the extension to do anyway.

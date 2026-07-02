@@ -29,6 +29,7 @@ import {
 	stateDir,
 	wsPort,
 	idleExitSeconds,
+	extensionRequestTimeoutMs,
 	type ClientToDaemon,
 	type DaemonToClient,
 } from './protocol';
@@ -53,7 +54,11 @@ function isAllowedOrigin(origin: string | undefined): boolean {
 	return ALLOWED_ORIGIN_PATTERNS.some((pattern) => pattern.test(origin));
 }
 
-const EXTENSION_REQUEST_TIMEOUT_MS = 45000;
+// Timeout for a single extension RPC round-trip. Multi-page netlist queries
+// on Board 3-sized schematics can exceed the default; override with
+// EDA_REQUEST_TIMEOUT_MS (or the EASYEDA_ alias) to raise. Parsing lives in
+// protocol.ts so the MCP-server proxy sizes its timeout from the same value.
+const EXTENSION_REQUEST_TIMEOUT_MS = extensionRequestTimeoutMs();
 
 interface Extension {
 	ws: WebSocket;
