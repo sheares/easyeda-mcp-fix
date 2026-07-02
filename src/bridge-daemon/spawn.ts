@@ -70,6 +70,12 @@ export async function ensureDaemonRunning(): Promise<void> {
 		stdio: ['ignore', logFd, logFd],
 		env: process.env,
 	});
+	// Spawn failures (EMFILE, EAGAIN, missing binary) emit 'error' on the
+	// ChildProcess; with no listener that's an uncaught exception in the MCP
+	// server process. Log it — the probe loop below will surface the failure.
+	child.once('error', (err) => {
+		console.error('[spawn] failed to spawn bridge daemon:', err);
+	});
 	child.unref();
 	closeSync(logFd);
 

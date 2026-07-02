@@ -120,13 +120,15 @@ async function main() {
 	// On daemon reconnect (after a crash or upgrade), re-list and diff. SDK
 	// auto-fires notifications/tools/list_changed for each register/remove.
 	proxy.onReconnected(() => {
-		proxy.listTools().then(
-			(tools) => {
+		// .catch (not a two-arg .then) so a throw inside syncToolList /
+		// registerDescriptor (e.g. fromJSONSchema on a schema from a newer
+		// daemon) is caught too instead of becoming an unhandled rejection.
+		proxy.listTools()
+			.then((tools) => {
 				syncToolList(tools);
 				console.error(`[MCP] Re-synced tools after daemon reconnect — ${tools.length} now registered`);
-			},
-			(err) => console.error('[MCP] Failed to re-list tools after reconnect:', err),
-		);
+			})
+			.catch((err) => console.error('[MCP] Failed to re-sync tools after reconnect:', err));
 	});
 
 	process.on('SIGINT', async () => { await proxy.stop(); process.exit(0); });
