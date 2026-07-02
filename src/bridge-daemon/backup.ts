@@ -40,6 +40,20 @@ function sanitizeForCommitMsg(s: string): string {
 }
 
 /**
+ * Validate a UUID-like value used as a single path segment under the backup
+ * repo. projectUuid comes from tool params (model-supplied) or the extension;
+ * docUuid from the extension or a tool param. Without this check, a value
+ * like `../../..` reaches join() and, in backupProject, an
+ * `rm(..., { recursive: true, force: true })` on an arbitrary directory.
+ */
+function requireSafePathSegment(value: string, label: string): string {
+	if (!/^[A-Za-z0-9._-]+$/.test(value) || value === '.' || value === '..') {
+		throw new Error(`Invalid ${label}: ${JSON.stringify(value)} — must be a plain identifier (letters, digits, ".", "_", "-").`);
+	}
+	return value;
+}
+
+/**
  * Join a zip entry name against a base directory, refusing entries that
  * escape the base (path traversal via `../` or absolute paths). Returns null
  * if the entry would land outside `base`; caller should skip those.
@@ -134,8 +148,8 @@ export async function backupDocument(
 ): Promise<BackupResult> {
 	const result = await ctx.sendToExtension('fileManager.getDocumentSource', { instance_id, document }) as DocSourceResponse;
 	const docCtx = result.context || {};
-	const projectUuid = docCtx.projectUuid || 'unknown-project';
-	const docUuid = docCtx.documentUuid || document.split('@')[0];
+	const projectUuid = requireSafePathSegment(docCtx.projectUuid || 'unknown-project', 'projectUuid');
+	const docUuid = requireSafePathSegment(docCtx.documentUuid || document.split('@')[0], 'documentUuid');
 	const ext = docExtensionFor(docCtx.documentType);
 
 	const repo = getBackupDir();
@@ -179,6 +193,7 @@ export async function backupProject(
 	ctx: ToolContext,
 	{ instance_id, projectUuid, toolName }: ProjectBackupParams,
 ): Promise<BackupResult> {
+	requireSafePathSegment(projectUuid, 'projectUuid');
 	const result = await ctx.sendToExtension('fileManager.getProjectFileByUuid', {
 		instance_id,
 		projectUuid,
