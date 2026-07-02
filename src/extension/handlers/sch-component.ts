@@ -139,6 +139,9 @@ export const schComponentHandlers: Record<string, (params: Record<string, any>) 
 	},
 
 	'sch.component.get': async (params) => {
+		if (params.skipNetlist) {
+			return eda.sch_PrimitiveComponent.get(params.primitiveIds);
+		}
 		const [components, netlist] = await Promise.all([
 			eda.sch_PrimitiveComponent.get(params.primitiveIds),
 			fetchParsedNetlist(),
@@ -153,11 +156,15 @@ export const schComponentHandlers: Record<string, (params: Record<string, any>) 
 	'sch.component.getAll': async (params) => {
 		// Fetch netlist in parallel with component fetching so netlist retrieval
 		// (which can be slow — see bug 4) doesn't serialise the response time.
-		const netlistPromise = fetchParsedNetlist();
+		// skipNetlist bypasses it entirely: on large projects the whole-project
+		// netlist call can exceed the RPC timeout, so callers who only need
+		// component geometry/metadata (e.g. a multi-page component count) can opt
+		// out and accept unresolved ={...} templates and pin-net names.
+		const netlistPromise: Promise<ParsedNetlist> | null = params.skipNetlist ? null : fetchParsedNetlist();
 		// Swallow a standalone rejection: if the page walk below throws before we
 		// await this, the parallel promise would otherwise surface as an
 		// unhandled rejection. The real await further down still sees the error.
-		netlistPromise.catch(() => { /* handled at the await below */ });
+		netlistPromise?.catch(() => { /* handled at the await below */ });
 
 		let components: any[];
 		if (params.allSchematicPages) {
@@ -207,11 +214,12 @@ export const schComponentHandlers: Record<string, (params: Record<string, any>) 
 			components = (await eda.sch_PrimitiveComponent.getAll(params.componentType, false)) as any[];
 		}
 
-		const netlist = await netlistPromise;
-
-		if (Array.isArray(components)) {
-			for (const comp of components) {
-				resolveComponentTemplates(comp, netlist);
+		if (netlistPromise) {
+			const netlist = await netlistPromise;
+			if (Array.isArray(components)) {
+				for (const comp of components) {
+					resolveComponentTemplates(comp, netlist);
+				}
 			}
 		}
 		return components;

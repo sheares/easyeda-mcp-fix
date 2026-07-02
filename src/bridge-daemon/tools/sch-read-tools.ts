@@ -20,6 +20,12 @@ Template expressions like ={Manufacturer Part} are automatically resolved to the
 					.boolean()
 					.optional()
 					.describe('If true, get components from all schematic pages instead of just the current page'),
+				skipNetlist: z
+					.boolean()
+					.optional()
+					.describe(
+						'If true, skip netlist resolution. Component pin-net names and ={...} template expressions are NOT resolved, but the call returns immediately. Use this on large projects where netlist retrieval is slow.',
+					),
 			}),
 			handler: async (params) => {
 				const result = await ctx.sendToExtension('sch.component.getAll', params);
@@ -34,6 +40,12 @@ Template expressions like ={Manufacturer Part} are automatically resolved to the
 				primitiveIds: z
 					.union([z.string(), z.array(z.string())])
 					.describe('Single primitive ID or array of primitive IDs'),
+				skipNetlist: z
+					.boolean()
+					.optional()
+					.describe(
+						'If true, skip netlist resolution. ={...} template expressions are NOT resolved, but the call returns immediately. Use this on large projects where netlist retrieval is slow.',
+					),
 			}),
 			handler: async (params) => {
 				const result = await ctx.sendToExtension('sch.component.get', params);
