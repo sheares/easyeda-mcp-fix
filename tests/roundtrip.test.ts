@@ -76,6 +76,26 @@ test('SchematicWriter serialize differs from input only in HEAD.maxId after a mu
 	}
 });
 
+test('SchematicWriter appends before the trailing newline when the source ends with one', () => {
+	const sourceWithTrailingNewline = ESCH_FIXTURE.endsWith('\n') ? ESCH_FIXTURE : ESCH_FIXTURE + '\n';
+	const model = parseSchematic(sourceWithTrailingNewline, { 'sym-resistor-uuid': ESYM_FIXTURE });
+	const writer = new SchematicWriter(sourceWithTrailingNewline, model);
+
+	// Append a line through the writer's internal path (palette-independent).
+	const wireId = (writer as any).allocId();
+	(writer as any).appendedLines.push(
+		wrapAsParsedLine(makeWireLine({ elementId: wireId, segments: [[0, 0, 10, 0]], lineStyleId: 'st9' })),
+	);
+	const out = writer.serialize();
+
+	assert.ok(out.endsWith('\n'), 'output should keep the trailing newline');
+	assert.ok(!/\n\n/.test(out), 'output should not contain an interior blank line');
+	// The appended wire should be on the last non-empty line.
+	const lines = out.split('\n');
+	assert.equal(lines[lines.length - 1], '', 'last split element should be empty (trailing newline)');
+	assert.ok(lines[lines.length - 2].startsWith('["WIRE"'), 'appended wire should be the final content line');
+});
+
 test('injected unknown tag is reported as unknown-tag and survives round-trip', () => {
 	const injected = ESCH_FIXTURE + '\n["FOOBAR","e999",null]';
 	const { lines, report } = parseEschSource(injected);

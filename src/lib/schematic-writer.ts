@@ -475,11 +475,15 @@ export class SchematicWriter {
 
 		// Skip removed lines; otherwise emit via the shared serializer.
 		const keep = this.lines.filter((l) => !this.removedLineIndices.has(l.lineIndex));
-		const original = serializeEschLines(keep);
-		const appended = this.appendedLines.length > 0
-			? '\n' + serializeEschLines(this.appendedLines)
-			: '';
-		return original + appended;
+		if (this.appendedLines.length === 0) return serializeEschLines(keep);
+		// Insert appended lines BEFORE any trailing empty lines. A source that
+		// ends with '\n' parses to a trailing blank line; naively concatenating
+		// after it would emit an interior empty line between body and appended
+		// content and drop the file's trailing newline.
+		let cut = keep.length;
+		while (cut > 0 && keep[cut - 1].kind === 'blank' && keep[cut - 1].raw === '') cut--;
+		const merged = [...keep.slice(0, cut), ...this.appendedLines, ...keep.slice(cut)];
+		return serializeEschLines(merged);
 	}
 
 	/**
