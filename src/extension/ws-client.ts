@@ -365,6 +365,13 @@ async function pushInstanceInfo(extensionUuid: string): Promise<void> {
 
 function handleConnectionLost(extensionUuid: string): void {
 	setConnected(false);
+	// Close the host-side registration before reconnecting. sys_WebSocket.register
+	// is a no-op when a connection with this ID is still considered active, so
+	// without this close a half-open socket (send threw, host still holds the
+	// registration) would make every reconnect attempt silently do nothing.
+	try {
+		eda.sys_WebSocket.close(WS_ID, undefined, undefined, extensionUuid);
+	} catch { /* already closed */ }
 	scheduleReconnect(extensionUuid);
 }
 
@@ -377,9 +384,19 @@ function connect(extensionUuid: string): void {
 	setConnecting(true);
 
 	// Clear the connecting flag after 10s if the connection never completes
-	// (sys_WebSocket.register fails silently if nothing is listening).
+	// (sys_WebSocket.register fails silently if nothing is listening), and
+	// schedule a retry — the daemon may simply not be up yet. Without this,
+	// a failed INITIAL connect (e.g. EasyEDA started before the bridge
+	// daemon) never retries: scheduleReconnect was previously only reachable
+	// from paths that require a prior successful connection.
 	setTimeout(() => {
-		if (!isConnected()) setConnecting(false);
+		if (!isConnected()) {
+			setConnecting(false);
+			try {
+				eda.sys_WebSocket.close(WS_ID, undefined, undefined, extensionUuid);
+			} catch { /* never opened */ }
+			scheduleReconnect(extensionUuid);
+		}
 	}, 10_000);
 
 	const wasConnectedBefore = (globalThis as any)[CONNECTED_EVER_KEY] === true;
@@ -413,6 +430,8 @@ function connect(extensionUuid: string): void {
 		);
 	} catch {
 		setConnecting(false);
+		// register() threw synchronously — retry later rather than staying dead.
+		scheduleReconnect(extensionUuid);
 	}
 }
 
