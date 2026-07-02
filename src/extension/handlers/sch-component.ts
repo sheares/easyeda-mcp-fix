@@ -1,4 +1,5 @@
 import { fetchParsedNetlist, resolveTemplateExpressions, type ParsedNetlist } from './sch-netlist-utils';
+import { preserveMetadataOnModify, BASE_METADATA_PRESERVE_FIELDS } from './preserve-metadata';
 
 /**
  * Resolve ={...} template expressions in all string fields of a component
@@ -83,6 +84,11 @@ async function createOneNetPort(params: Record<string, any>) {
 	);
 }
 
+const schPrimitiveApi = {
+	get: (ids: string[]) => eda.sch_PrimitiveComponent.get(ids),
+	modify: (id: string, prop: Record<string, any>) => eda.sch_PrimitiveComponent.modify(id, prop),
+};
+
 export const schComponentHandlers: Record<string, (params: Record<string, any>) => Promise<any>> = {
 	'sch.component.create': async (params) => {
 		return eda.sch_PrimitiveComponent.create(
@@ -124,7 +130,12 @@ export const schComponentHandlers: Record<string, (params: Record<string, any>) 
 	},
 
 	'sch.component.modify': async (params) => {
-		return eda.sch_PrimitiveComponent.modify(params.primitiveId, params.property);
+		return preserveMetadataOnModify(
+			schPrimitiveApi,
+			BASE_METADATA_PRESERVE_FIELDS,
+			params.primitiveId,
+			params.property,
+		);
 	},
 
 	'sch.component.get': async (params) => {
@@ -140,10 +151,64 @@ export const schComponentHandlers: Record<string, (params: Record<string, any>) 
 	},
 
 	'sch.component.getAll': async (params) => {
-		const [components, netlist] = await Promise.all([
-			eda.sch_PrimitiveComponent.getAll(params.componentType, params.allSchematicPages),
-			fetchParsedNetlist(),
-		]);
+		// Fetch netlist in parallel with component fetching so netlist retrieval
+		// (which can be slow — see bug 4) doesn't serialise the response time.
+		const netlistPromise = fetchParsedNetlist();
+		// Swallow a standalone rejection: if the page walk below throws before we
+		// await this, the parallel promise would otherwise surface as an
+		// unhandled rejection. The real await further down still sees the error.
+		netlistPromise.catch(() => { /* handled at the await below */ });
+
+		let components: any[];
+		if (params.allSchematicPages) {
+			// EDA Pro ignores the flag on the native getAll(type, allSchematicPages)
+			// call — it only ever returns the active page — so walk the pages
+			// ourselves via openDocument and union the results.
+			const pages: any = await eda.dmt_Schematic.getAllSchematicPagesInfo();
+			const currentPage: any = await eda.dmt_Schematic.getCurrentSchematicPageInfo();
+			const originalUuid = currentPage?.uuid;
+
+			components = [];
+			try {
+				if (Array.isArray(pages)) {
+					for (const page of pages) {
+						const uuid = page?.uuid;
+						if (!uuid) continue;
+						await eda.dmt_EditorControl.openDocument(uuid);
+						// Confirm the open actually landed on the target page. A
+						// failed open leaves the editor on the previous page, and
+						// re-reading it would duplicate that page's components into
+						// the union — abort loudly instead.
+						const active: any = await eda.dmt_Schematic.getCurrentSchematicPageInfo();
+						if (active?.uuid !== uuid) {
+							throw new Error(
+								`Failed to open schematic page ${uuid} (still on ${active?.uuid ?? 'unknown'}); aborting multi-page scan to avoid duplicated components.`,
+							);
+						}
+						const pageComponents = await eda.sch_PrimitiveComponent.getAll(params.componentType, false);
+						if (Array.isArray(pageComponents)) {
+							components.push(...pageComponents);
+						}
+					}
+				} else {
+					components = (await eda.sch_PrimitiveComponent.getAll(params.componentType, false)) as any[];
+				}
+			} finally {
+				// Always restore the user's original page, even if a page open
+				// failed mid-walk. Best-effort: a restore failure must not mask
+				// the original error.
+				if (originalUuid) {
+					try {
+						await eda.dmt_EditorControl.openDocument(originalUuid);
+					} catch { /* leave the editor where it is rather than mask the throw */ }
+				}
+			}
+		} else {
+			components = (await eda.sch_PrimitiveComponent.getAll(params.componentType, false)) as any[];
+		}
+
+		const netlist = await netlistPromise;
+
 		if (Array.isArray(components)) {
 			for (const comp of components) {
 				resolveComponentTemplates(comp, netlist);
