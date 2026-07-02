@@ -76,6 +76,11 @@ interface PendingExtensionRequest {
 	reject: (err: Error) => void;
 	timer: ReturnType<typeof setTimeout>;
 	instanceId: string;
+	// The exact socket the request went out on. Responses are only accepted
+	// from this socket, and disconnect-rejection only applies to this socket's
+	// pendings — so a reconnect with the same instanceId can't spoof or wipe
+	// requests that belong to another connection.
+	ws: WebSocket;
 }
 
 const extensions = new Map<string, Extension>(); // instanceId → Extension
@@ -152,7 +157,7 @@ function sendToExtensionRaw(ext: Extension, method: string, params: Record<strin
 			pendingExtRequests.delete(id);
 			reject(new Error(`Request timed out after ${EXTENSION_REQUEST_TIMEOUT_MS}ms: ${method}`));
 		}, EXTENSION_REQUEST_TIMEOUT_MS);
-		pendingExtRequests.set(id, { resolve, reject, timer, instanceId: ext.info.instanceId });
+		pendingExtRequests.set(id, { resolve, reject, timer, instanceId: ext.info.instanceId, ws: ext.ws });
 		try {
 			ext.ws.send(JSON.stringify({ id, method, params }));
 		} catch (err) {
@@ -254,7 +259,7 @@ function updateInstanceInfo(instanceId: string, data: Record<string, unknown>): 
 	ext.info.documents = data.documents as Array<{ title: string; uuid: string }> | undefined;
 }
 
-function handleExtensionMessage(instanceId: string, raw: string): void {
+function handleExtensionMessage(instanceId: string, ws: WebSocket, raw: string): void {
 	let msg: any;
 	try {
 		msg = JSON.parse(raw);
@@ -280,6 +285,14 @@ function handleExtensionMessage(instanceId: string, raw: string): void {
 	const id: string = msg.id;
 	const p = pendingExtRequests.get(id);
 	if (!p) return;
+	// Only the socket the request went out on may answer it. RPC ids are
+	// global and sequential, so without this check any connected extension
+	// (or a reconnected socket for the same instance) could resolve another
+	// instance's pending request.
+	if (p.ws !== ws) {
+		log(`Ignoring response for ${id} from wrong socket (instance: ${instanceId})`);
+		return;
+	}
 	clearTimeout(p.timer);
 	pendingExtRequests.delete(id);
 	if (msg.error !== undefined) p.reject(new Error(String(msg.error)));
@@ -390,13 +403,19 @@ function startWebSocketServer(): Promise<void> {
 			extensions.set(instanceId, ext);
 			log(`Extension connected (instance: ${instanceId})`);
 
-			ws.on('message', (data) => handleExtensionMessage(instanceId, data.toString()));
+			ws.on('message', (data) => handleExtensionMessage(instanceId, ws, data.toString()));
 
 			ws.on('close', () => {
 				log(`Extension disconnected (instance: ${instanceId})`);
-				extensions.delete(instanceId);
+				// A reconnect with the same instanceId replaces the map entry
+				// before this old socket's close event fires. Only remove the
+				// entry if it still belongs to this socket, and only reject
+				// pendings that went out on this socket.
+				if (extensions.get(instanceId)?.ws === ws) {
+					extensions.delete(instanceId);
+				}
 				for (const [id, p] of pendingExtRequests) {
-					if (p.instanceId === instanceId) {
+					if (p.ws === ws) {
 						clearTimeout(p.timer);
 						pendingExtRequests.delete(id);
 						p.reject(new Error(`EDA Pro Extension disconnected (instance: ${instanceId})`));
@@ -580,9 +599,11 @@ function shutdown(code: number): void {
 	clients.clear();
 
 	const done = () => {
-		unlink(socketPath()).catch(() => { /* noop */ });
-		unlink(pidPath()).catch(() => { /* noop */ });
-		process.exit(code);
+		// Await the unlinks — exiting on the next line would abandon them,
+		// leaving a stale socket/pid file that costs every restart an
+		// EADDRINUSE → probe → unlink → rebind cycle.
+		void Promise.allSettled([unlink(socketPath()), unlink(pidPath())])
+			.then(() => process.exit(code));
 	};
 
 	let waiting = 0;
