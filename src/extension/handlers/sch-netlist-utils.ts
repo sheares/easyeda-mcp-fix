@@ -9,22 +9,84 @@ export interface ParsedNetlistComponent {
 // Keyed by component uniqueId
 export type ParsedNetlist = Record<string, ParsedNetlistComponent>;
 
-export async function fetchParsedNetlist(): Promise<ParsedNetlist> {
-	const raw = await eda.sch_Netlist.getNetlist(ESYS_NetlistType.JLCEDA_PRO);
-	const data: Record<string, any> = typeof raw === 'string' ? JSON.parse(raw) : raw;
+function parseRawNetlist(raw: unknown): ParsedNetlist {
+	const data: Record<string, any> = typeof raw === 'string' ? JSON.parse(raw) : (raw as any);
 	const result: ParsedNetlist = {};
-	for (const [uniqueId, entry] of Object.entries(data)) {
+	for (const [uniqueId, entry] of Object.entries(data ?? {})) {
 		if (!entry || typeof entry !== 'object') continue;
-		const props = entry.props || {};
+		const props = (entry as any).props || {};
 		result[uniqueId] = {
 			designator: props.Designator || '',
 			part: props.Name || '',
 			manufacturerPart: props['Manufacturer Part'] || '',
 			allProps: props,
-			pins: entry.pins || {},
+			pins: (entry as any).pins || {},
 		};
 	}
 	return result;
+}
+
+// EDA Pro's getNetlist() recomputes the whole-project netlist and can take tens
+// of seconds on large boards (see bug 4). The result only changes when the
+// schematic topology changes, so we memoise it and invalidate on every
+// schematic-write handler. The TTL is a backstop for edits made directly in the
+// EDA Pro UI (which don't go through our handlers); callers can also force a
+// fresh read. The cache is keyed by project so switching projects in the same
+// window never serves another project's netlist.
+const NETLIST_CACHE_TTL_MS = 60_000;
+
+interface NetlistCacheEntry {
+	projectUuid: string | null;
+	parsed: ParsedNetlist;
+	fetchedAt: number;
+}
+
+let netlistCache: NetlistCacheEntry | null = null;
+let netlistInflight: Promise<ParsedNetlist> | null = null;
+
+async function currentProjectUuid(): Promise<string | null> {
+	try {
+		const info: any = await eda.dmt_Project.getCurrentProjectInfo();
+		return info?.uuid ?? info?.projectId ?? info?.id ?? null;
+	} catch {
+		return null;
+	}
+}
+
+/** Drop the memoised netlist so the next fetch recomputes it. */
+export function invalidateNetlistCache(): void {
+	netlistCache = null;
+}
+
+export async function fetchParsedNetlist(forceRefresh = false): Promise<ParsedNetlist> {
+	const projectUuid = await currentProjectUuid();
+	const now = Date.now();
+
+	if (
+		!forceRefresh &&
+		netlistCache &&
+		netlistCache.projectUuid === projectUuid &&
+		now - netlistCache.fetchedAt < NETLIST_CACHE_TTL_MS
+	) {
+		return netlistCache.parsed;
+	}
+
+	// Coalesce concurrent fetches (e.g. get + getAll firing together) onto a
+	// single getNetlist round-trip.
+	if (netlistInflight) return netlistInflight;
+
+	netlistInflight = (async () => {
+		try {
+			const raw = await eda.sch_Netlist.getNetlist(ESYS_NetlistType.JLCEDA_PRO);
+			const parsed = parseRawNetlist(raw);
+			netlistCache = { projectUuid, parsed, fetchedAt: Date.now() };
+			return parsed;
+		} finally {
+			netlistInflight = null;
+		}
+	})();
+
+	return netlistInflight;
 }
 
 /**

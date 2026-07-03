@@ -1,4 +1,4 @@
-import { fetchParsedNetlist, fetchPinNames } from './sch-netlist-utils';
+import { fetchParsedNetlist, fetchPinNames, invalidateNetlistCache } from './sch-netlist-utils';
 
 export const schDocumentHandlers: Record<string, (params: Record<string, any>) => Promise<any>> = {
 	'sch.document.save': async () => {
@@ -22,7 +22,9 @@ export const schDocumentHandlers: Record<string, (params: Record<string, any>) =
 	},
 
 	'sch.netlist.set': async (params) => {
-		return eda.sch_Netlist.setNetlist(params.type, params.netlist);
+		const result = await eda.sch_Netlist.setNetlist(params.type, params.netlist);
+		invalidateNetlistCache();
+		return result;
 	},
 
 	'sch.connectivity.get': async (params) => {
@@ -36,7 +38,7 @@ export const schDocumentHandlers: Record<string, (params: Record<string, any>) =
 
 		// 1. Fetch parsed netlist and all components
 		const [netlist, allComponents] = await Promise.all([
-			fetchParsedNetlist(),
+			fetchParsedNetlist(params.refresh === true),
 			(eda.sch_PrimitiveComponent as any).getAll('part', true),
 		]);
 

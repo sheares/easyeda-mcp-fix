@@ -1,4 +1,4 @@
-import { fetchParsedNetlist, resolveTemplateExpressions, type ParsedNetlist } from './sch-netlist-utils';
+import { fetchParsedNetlist, invalidateNetlistCache, resolveTemplateExpressions, type ParsedNetlist } from './sch-netlist-utils';
 import { preserveMetadataOnModify, BASE_METADATA_PRESERVE_FIELDS } from './preserve-metadata';
 
 /**
@@ -91,7 +91,7 @@ const schPrimitiveApi = {
 
 export const schComponentHandlers: Record<string, (params: Record<string, any>) => Promise<any>> = {
 	'sch.component.create': async (params) => {
-		return eda.sch_PrimitiveComponent.create(
+		const result = await eda.sch_PrimitiveComponent.create(
 			params.component,
 			params.x,
 			params.y,
@@ -101,6 +101,8 @@ export const schComponentHandlers: Record<string, (params: Record<string, any>) 
 			params.addIntoBom,
 			params.addIntoPcb,
 		);
+		invalidateNetlistCache();
+		return result;
 	},
 
 	'sch.component.createNetFlag': async (params) => {
@@ -109,9 +111,12 @@ export const schComponentHandlers: Record<string, (params: Record<string, any>) 
 			for (const item of params.batch) {
 				results.push(await createOneNetFlag(item));
 			}
+			invalidateNetlistCache();
 			return results;
 		}
-		return createOneNetFlag(params);
+		const result = await createOneNetFlag(params);
+		invalidateNetlistCache();
+		return result;
 	},
 
 	'sch.component.createNetPort': async (params) => {
@@ -120,22 +125,29 @@ export const schComponentHandlers: Record<string, (params: Record<string, any>) 
 			for (const item of params.batch) {
 				results.push(await createOneNetPort(item));
 			}
+			invalidateNetlistCache();
 			return results;
 		}
-		return createOneNetPort(params);
+		const result = await createOneNetPort(params);
+		invalidateNetlistCache();
+		return result;
 	},
 
 	'sch.component.delete': async (params) => {
-		return eda.sch_PrimitiveComponent.delete(params.ids);
+		const result = await eda.sch_PrimitiveComponent.delete(params.ids);
+		invalidateNetlistCache();
+		return result;
 	},
 
 	'sch.component.modify': async (params) => {
-		return preserveMetadataOnModify(
+		const result = await preserveMetadataOnModify(
 			schPrimitiveApi,
 			BASE_METADATA_PRESERVE_FIELDS,
 			params.primitiveId,
 			params.property,
 		);
+		invalidateNetlistCache();
+		return result;
 	},
 
 	'sch.component.get': async (params) => {
@@ -144,7 +156,7 @@ export const schComponentHandlers: Record<string, (params: Record<string, any>) 
 		}
 		const [components, netlist] = await Promise.all([
 			eda.sch_PrimitiveComponent.get(params.primitiveIds),
-			fetchParsedNetlist(),
+			fetchParsedNetlist(params.refresh === true),
 		]);
 		const arr = Array.isArray(components) ? components : components ? [components] : [];
 		for (const comp of arr) {
@@ -160,7 +172,9 @@ export const schComponentHandlers: Record<string, (params: Record<string, any>) 
 		// netlist call can exceed the RPC timeout, so callers who only need
 		// component geometry/metadata (e.g. a multi-page component count) can opt
 		// out and accept unresolved ={...} templates and pin-net names.
-		const netlistPromise: Promise<ParsedNetlist> | null = params.skipNetlist ? null : fetchParsedNetlist();
+		const netlistPromise: Promise<ParsedNetlist> | null = params.skipNetlist
+			? null
+			: fetchParsedNetlist(params.refresh === true);
 		// Swallow a standalone rejection: if the page walk below throws before we
 		// await this, the parallel promise would otherwise surface as an
 		// unhandled rejection. The real await further down still sees the error.
@@ -234,7 +248,7 @@ export const schComponentHandlers: Record<string, (params: Record<string, any>) 
 		const comp = Array.isArray(rawComp) ? rawComp[0] : rawComp;
 		if (!comp?.uniqueId) return pins;
 
-		const netlist = await fetchParsedNetlist();
+		const netlist = await fetchParsedNetlist(params.refresh === true);
 		const netEntry = netlist[comp.uniqueId];
 		if (!netEntry) return pins;
 

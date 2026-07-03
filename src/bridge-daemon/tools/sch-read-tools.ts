@@ -26,6 +26,12 @@ Template expressions like ={Manufacturer Part} are automatically resolved to the
 					.describe(
 						'If true, skip netlist resolution. Component pin-net names and ={...} template expressions are NOT resolved, but the call returns immediately. Use this on large projects where netlist retrieval is slow.',
 					),
+				refresh: z
+					.boolean()
+					.optional()
+					.describe(
+						'If true, bypass the netlist cache and force a fresh recompute. Use after editing the schematic directly in the EasyEDA UI (edits made through these tools invalidate the cache automatically).',
+					),
 			}),
 			handler: async (params) => {
 				const result = await ctx.sendToExtension('sch.component.getAll', params);
@@ -46,6 +52,12 @@ Template expressions like ={Manufacturer Part} are automatically resolved to the
 					.describe(
 						'If true, skip netlist resolution. ={...} template expressions are NOT resolved, but the call returns immediately. Use this on large projects where netlist retrieval is slow.',
 					),
+				refresh: z
+					.boolean()
+					.optional()
+					.describe(
+						'If true, bypass the netlist cache and force a fresh recompute. Use after editing the schematic directly in the EasyEDA UI (edits made through these tools invalidate the cache automatically).',
+					),
 			}),
 			handler: async (params) => {
 				const result = await ctx.sendToExtension('sch.component.get', params);
@@ -61,6 +73,12 @@ Each pin includes a net field with the net name it is connected to (empty string
 Pins connected to $-prefixed nets (like $R11_1) are on unnamed nets that still carry real signals — use sch_get_connectivity with that net name to see what else is connected.`,
 			inputShape: withQueryParams({
 				primitiveId: z.string().describe('The component primitive ID'),
+				refresh: z
+					.boolean()
+					.optional()
+					.describe(
+						'If true, bypass the netlist cache and force a fresh recompute. Use after editing the schematic directly in the EasyEDA UI (edits made through these tools invalidate the cache automatically).',
+					),
 			}),
 			handler: async (params) => {
 				const result = await ctx.sendToExtension('sch.component.getAllPins', params);
@@ -194,6 +212,12 @@ Use the depth parameter (default 2) to automatically trace through $-prefixed ne
 					.max(5)
 					.optional()
 					.describe('How many hops to trace through $-prefixed (unnamed) nets from the specified designators. depth=1 shows only direct connections. depth=2 (default) follows unnamed nets one hop out — finds buttons/pull-ups/regulators connected through series resistors. Higher values chase longer chains. Only used with designators parameter.'),
+				refresh: z
+					.boolean()
+					.optional()
+					.describe(
+						'If true, bypass the netlist cache and force a fresh recompute. Use after editing the schematic directly in the EasyEDA UI (edits made through these tools invalidate the cache automatically).',
+					),
 			}),
 			handler: async (params) => {
 				const result = await ctx.sendToExtension('sch.connectivity.get', params);
