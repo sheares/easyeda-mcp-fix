@@ -32,9 +32,9 @@ Severity: **C** = fix before relying on it, **H** = important, **N** = nice-to-h
 `src/extension/ws-client.ts:375-417`. All three failure paths of `connect()` skip `scheduleReconnect()`; it is only reachable after a previously successful connection. If EasyEDA starts before the daemon, the extension makes one attempt and stays dead until manual Connect. Compounding it, `extension.json:21` has `"activationEvents": {}`, so `activate()` (src/extension/index.ts:7-17) is dead code and the persisted `autoConnect` setting does nothing across restarts.
 **Fix:** call `scheduleReconnect()` on every connect failure path, and register `activate` under `"onStartupFinished"`.
 
-### C7. Pin world positions ignore `flip`: silently wrong writes
-`src/lib/schematic-reader.ts:321-333` never consults `comp.flip` (parsed at :269). Every mirrored component gets wrong `worldX/worldY/worldAngle`, and `addNetport`/`addSeriesResistor`/`addPowerSymbol` then write elements at those wrong coordinates. README admits flip is unimplemented, but the lib returns confidently wrong data instead of refusing.
-**Fix:** implement (geometry.ts:241 already has the transform) or throw when `flip !== 0`.
+### C7. Pin world positions ignore `flip`: silently wrong writes — RESOLVED (2026-07-03)
+`src/lib/schematic-reader.ts:321-333` never consulted `comp.flip` (parsed at :269). Every mirrored component got wrong `worldX/worldY/worldAngle`, and `addNetport`/`addSeriesResistor`/`addPowerSymbol` then wrote elements at those wrong coordinates.
+**Fix applied:** the pin loop now calls `transformSymbolPoint(sp.x, sp.y, comp.rotation, comp.flip)` (mirror about local Y first, then rotate — matching the verified `geometry.ts:transformPoint` convention) and `transformPinAngle(sp.angle, comp.rotation, comp.flip)` (θ → 180−θ on flip, normalised to [0,360)). Regression coverage in `tests/schematic-reader-flip.test.ts` (flip=0 baseline + flip=1 position/angle).
 
 ---
 

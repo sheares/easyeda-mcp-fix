@@ -143,15 +143,35 @@ export interface SchematicModel {
 	symbolValidation: Record<string, ValidationReport>;
 }
 
-function rotatePoint(sx: number, sy: number, rotationDeg: number): [number, number] {
-	if (rotationDeg === 0) return [sx, sy];
-	const rad = (rotationDeg * Math.PI) / 180;
-	const cos = Math.cos(rad);
-	const sin = Math.sin(rad);
-	return [
-		Math.round((sx * cos - sy * sin) * 1000) / 1000,
-		Math.round((sx * sin + sy * cos) * 1000) / 1000,
-	];
+// Place a symbol-local point into instance coordinates. Mirror (flip about the
+// local Y axis) is applied first, then rotation — matching EasyEDA's convention
+// and geometry.ts:transformPoint. Translation by the component origin is the
+// caller's job.
+function transformSymbolPoint(
+	sx: number,
+	sy: number,
+	rotationDeg: number,
+	flip: number,
+): [number, number] {
+	let x = flip ? -sx : sx;
+	let y = sy;
+	if (rotationDeg !== 0) {
+		const rad = (rotationDeg * Math.PI) / 180;
+		const cos = Math.cos(rad);
+		const sin = Math.sin(rad);
+		const rx = x * cos - y * sin;
+		const ry = x * sin + y * cos;
+		x = rx;
+		y = ry;
+	}
+	return [Math.round(x * 1000) / 1000, Math.round(y * 1000) / 1000];
+}
+
+// Mirror about the local Y axis maps a pin direction θ to 180−θ; rotation then
+// adds the instance angle. Normalised to [0, 360).
+function transformPinAngle(pinAngle: number, rotationDeg: number, flip: number): number {
+	const mirrored = flip ? 180 - pinAngle : pinAngle;
+	return (((mirrored + rotationDeg) % 360) + 360) % 360;
 }
 
 /**
@@ -318,7 +338,7 @@ export function parseSchematic(
 		if (sym.symbolType === 18) comp.isPowerSymbol = true;
 
 		for (const sp of sym.pins) {
-			const [rx, ry] = rotatePoint(sp.x, sp.y, comp.rotation);
+			const [rx, ry] = transformSymbolPoint(sp.x, sp.y, comp.rotation, comp.flip);
 			const pin: PinInfo = {
 				symbolPinId: sp.id,
 				number: sp.number,
@@ -330,7 +350,7 @@ export function parseSchematic(
 				angle: sp.angle,
 				worldX: comp.x + rx,
 				worldY: comp.y + ry,
-				worldAngle: (sp.angle + comp.rotation) % 360,
+				worldAngle: transformPinAngle(sp.angle, comp.rotation, comp.flip),
 			};
 			comp.pins.push(pin);
 		}

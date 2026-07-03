@@ -196,7 +196,6 @@ Not yet built (potential next features):
 - Decoupling cap placement (`addDecouplingCaps`)
 - Bus connections (`connectBus(srcPins, dstPins, netPrefix)`)
 - Wire routing (real wires instead of netports — needs spatial reasoning)
-- Component flip handling (untested)
 
 ## See Also
 
