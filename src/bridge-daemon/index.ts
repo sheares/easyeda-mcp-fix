@@ -19,7 +19,7 @@
 import { WebSocketServer, WebSocket } from 'ws';
 import type { IncomingMessage } from 'http';
 import { createServer as createNetServer, type Socket as NetSocket } from 'node:net';
-import { mkdir, unlink, writeFile } from 'node:fs/promises';
+import { mkdir, unlink, writeFile, chmod } from 'node:fs/promises';
 import { statSync } from 'node:fs';
 import { createConnection } from 'node:net';
 import { randomBytes } from 'node:crypto';
@@ -468,6 +468,11 @@ function startUdsServer(sockPath: string): Promise<void> {
 
 		server.on('error', (err) => reject(err));
 		server.listen(sockPath, () => {
+			// Restrict the socket to the owning user. The state dir is already
+			// 0700, but lock the socket file too as defence in depth (some
+			// platforms gate UDS connect on the socket's own mode). Best-effort:
+			// a chmod failure shouldn't stop the daemon from serving.
+			chmod(sockPath, 0o600).catch((err) => log('chmod socket failed:', err));
 			log(`UDS listening at ${sockPath}`);
 			startUdsFileMonitor(sockPath);
 			resolve();
@@ -629,6 +634,11 @@ process.on('SIGTERM', () => shutdown(0));
 
 async function main(): Promise<void> {
 	await mkdir(stateDir(), { recursive: true });
+	// Lock the state dir to the owning user (0700). It holds the UDS socket and
+	// pid file; a world-traversable dir would let other local users reach the
+	// socket, which carries file-writing tool calls. Explicit chmod because
+	// mkdir's mode is subject to umask. Best-effort — don't abort startup.
+	await chmod(stateDir(), 0o700).catch((err) => log('chmod state dir failed:', err));
 	await bindUdsWithSingletonCheck();
 	await startWebSocketServer();
 	await writeFile(pidPath(), String(process.pid));
