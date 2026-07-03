@@ -1,3 +1,5 @@
+import { bridgeLog, describeError } from '../diag';
+
 export interface ParsedNetlistComponent {
 	designator: string;
 	part: string;
@@ -76,11 +78,17 @@ export async function fetchParsedNetlist(forceRefresh = false): Promise<ParsedNe
 	if (netlistInflight) return netlistInflight;
 
 	netlistInflight = (async () => {
+		const t0 = Date.now();
+		bridgeLog(`getNetlist: start (project=${projectUuid ?? 'unknown'}, forceRefresh=${forceRefresh})`);
 		try {
 			const raw = await eda.sch_Netlist.getNetlist(ESYS_NetlistType.JLCEDA_PRO);
 			const parsed = parseRawNetlist(raw);
 			netlistCache = { projectUuid, parsed, fetchedAt: Date.now() };
+			bridgeLog(`getNetlist: done in ${Date.now() - t0}ms (${Object.keys(parsed).length} components)`);
 			return parsed;
+		} catch (err) {
+			bridgeLog(`getNetlist: FAILED after ${Date.now() - t0}ms: ${describeError(err)}`);
+			throw err;
 		} finally {
 			netlistInflight = null;
 		}

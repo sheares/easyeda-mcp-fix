@@ -16,6 +16,7 @@ import { layerHandlers } from './handlers/layer';
 import { pcbPrimitiveHandlers } from './handlers/pcb-primitive';
 import { editorHandlers } from './handlers/editor';
 import { fileManagerHandlers } from './handlers/file-manager';
+import { describeError, setBridgeLogEmitter } from './diag';
 
 // Single bridge daemon owns the WebSocket port. No more scanning.
 // 16168 is one above the legacy 15168-15207 scan range — chosen so the
@@ -309,24 +310,20 @@ function handleMessage(extensionUuid: string, event: MessageEvent<any>): void {
 					handler(handlerParams).then(
 						(result) => sendResponse(extensionUuid, id!, applyQueryParams(result, qp)),
 						(err: any) => {
-							const errorMsg = err instanceof Error ? err.message : String(err);
-							sendResponse(extensionUuid, id!, undefined, errorMsg);
+							sendResponse(extensionUuid, id!, undefined, describeError(err));
 						},
 					),
 				(err: any) => {
-					const errorMsg = err instanceof Error ? err.message : String(err);
-					sendResponse(extensionUuid, id!, undefined, errorMsg);
+					sendResponse(extensionUuid, id!, undefined, describeError(err));
 				},
 			),
 			(err: any) => {
-				const errorMsg = err instanceof Error ? err.message : String(err);
-				sendResponse(extensionUuid, id!, undefined, `Failed to switch to document "${document}": ${errorMsg}`);
+				sendResponse(extensionUuid, id!, undefined, `Failed to switch to document "${document}": ${describeError(err)}`);
 			},
 		);
 	} catch (err: any) {
-		const errorMsg = err instanceof Error ? err.message : String(err);
 		if (id) {
-			sendResponse(extensionUuid, id, undefined, errorMsg);
+			sendResponse(extensionUuid, id, undefined, describeError(err));
 		}
 	}
 }
@@ -550,6 +547,7 @@ export function startLiveMode(extensionUuid: string): void {
 	const g = globalThis as any;
 	g[LIVE_MODE_KEY] = true;
 	g[LIVE_UUID_KEY] = extensionUuid;
+	setBridgeLogEmitter((message) => sendNotification(extensionUuid, 'log', { message }));
 	resetReconnectAttempts();
 	startHeartbeat(extensionUuid);
 	connect(extensionUuid);
@@ -567,6 +565,7 @@ export function stopLiveMode(): void {
 		g[RECONNECT_CHECK_KEY] = null;
 	}
 	stopHeartbeat();
+	setBridgeLogEmitter(null);
 }
 
 export function isLiveModeActive(): boolean {

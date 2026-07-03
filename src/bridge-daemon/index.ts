@@ -281,6 +281,16 @@ function handleExtensionMessage(instanceId: string, ws: WebSocket, raw: string):
 		return;
 	}
 
+	// Diagnostic line from the extension (it has no filesystem access, so it
+	// ships logs here). Sanitise: strip CR/LF and cap length so a log line
+	// can't be smuggled with forged prefixes or blow up the file.
+	if (msg.type === 'log') {
+		const raw = typeof msg.data?.message === 'string' ? msg.data.message : '';
+		const safe = raw.replace(/[\r\n]+/g, ' ').slice(0, 2000);
+		log(`[ext ${instanceId}] ${safe}`);
+		return;
+	}
+
 	// Response to a prior RPC. id is the daemon-internal id.
 	const id: string = msg.id;
 	const p = pendingExtRequests.get(id);
