@@ -10,7 +10,7 @@
 		"typecheck": "npm run typecheck:mcp && npm run typecheck:extension",
 		"typecheck:mcp": "tsc --noEmit",
 		"typecheck:extension": "tsc -p tsconfig.extension.json",
-		"test": "node --require ts-node/register --test tests/roundtrip.test.ts tests/geometry.test.ts tests/symbol-editor.test.ts tests/schematic-reader-flip.test.ts tests/bridge-daemon.test.ts"
+		"test": "node --require ts-node/register --test tests/roundtrip.test.ts tests/geometry.test.ts tests/symbol-editor.test.ts tests/schematic-reader-flip.test.ts tests/pcb-params.test.ts tests/sch-netlist-parse.test.ts tests/bridge-daemon.test.ts"
 	},
 	"dependencies": {
 		"@modelcontextprotocol/sdk": "^1.27.1",

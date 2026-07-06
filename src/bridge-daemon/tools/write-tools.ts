@@ -2,6 +2,11 @@ import { z } from 'zod';
 import type { ToolDef, ToolContext } from '../types';
 import { withDocumentParam } from './query-params';
 
+const layerParam = (description: string) => z.union([z.string(), z.number()]).describe(description);
+
+const LAYER_DESC =
+	'Layer name (e.g. "TopLayer", "BottomLayer", "Inner1".."Inner30", "Multi") or numeric EPCB_LayerId (1=Top, 2=Bottom, 12=Multi). Names are converted to the numeric id EasyEDA requires.';
+
 const DELETE_HANDLER_MAP: Record<string, string> = {
 	component: 'pcb.delete.component',
 	track: 'pcb.delete.line',
@@ -33,7 +38,7 @@ export function writeTools(ctx: ToolContext): ToolDef[] {
 			description: 'Create a single track segment (line) between two points on a specified layer and net',
 			inputShape: withDocumentParam({
 				net: z.string().describe('Net name for the track'),
-				layer: z.string().describe('Layer name (e.g. "TopLayer", "BottomLayer", "InnerLayer1")'),
+				layer: layerParam(LAYER_DESC),
 				startX: z.number().describe('Start X coordinate'),
 				startY: z.number().describe('Start Y coordinate'),
 				endX: z.number().describe('End X coordinate'),
@@ -51,7 +56,7 @@ export function writeTools(ctx: ToolContext): ToolDef[] {
 			description: 'Create a multi-segment polyline track defined by a series of points',
 			inputShape: withDocumentParam({
 				net: z.string().describe('Net name for the track'),
-				layer: z.string().describe('Layer name'),
+				layer: layerParam(LAYER_DESC),
 				polygon: z
 					.array(z.object({ x: z.number(), y: z.number() }))
 					.min(2)
@@ -86,7 +91,7 @@ export function writeTools(ctx: ToolContext): ToolDef[] {
 			description: 'Create an arc track segment on the PCB',
 			inputShape: withDocumentParam({
 				net: z.string().describe('Net name'),
-				layer: z.string().describe('Layer name'),
+				layer: layerParam(LAYER_DESC),
 				startX: z.number().describe('Start X coordinate'),
 				startY: z.number().describe('Start Y coordinate'),
 				endX: z.number().describe('End X coordinate'),
@@ -104,7 +109,7 @@ export function writeTools(ctx: ToolContext): ToolDef[] {
 			name: 'pcb_create_pad',
 			description: 'Create a standalone pad on the PCB',
 			inputShape: withDocumentParam({
-				layer: z.string().describe('Pad layer'),
+				layer: layerParam(LAYER_DESC),
 				padNumber: z.string().describe('Pad number/name'),
 				x: z.number().describe('X coordinate'),
 				y: z.number().describe('Y coordinate'),
@@ -122,10 +127,10 @@ export function writeTools(ctx: ToolContext): ToolDef[] {
 			description: 'Create a copper pour region on the PCB',
 			inputShape: withDocumentParam({
 				net: z.string().describe('Net name for the pour'),
-				layer: z.string().describe('Layer name'),
+				layer: layerParam(LAYER_DESC),
 				polygon: z
 					.array(z.union([z.string(), z.number()]))
-					.describe('Polygon source array, e.g. ["L", x1, y1, x2, y2, ..., x1, y1]'),
+					.describe('Polygon source array in EasyEDA L-mode order: [x1, y1, "L", x2, y2, ..., x1, y1] — coordinates of the first point, then the "L" token, then the remaining points (closed: last point repeats the first)'),
 				pourFillMethod: z.enum(['solid', '45grid', '90grid']).optional().describe('Fill method'),
 				preserveSilos: z.boolean().optional().describe('Whether to preserve copper islands'),
 				pourName: z.string().optional().describe('Name for the pour region'),
@@ -142,10 +147,10 @@ export function writeTools(ctx: ToolContext): ToolDef[] {
 			name: 'pcb_create_fill',
 			description: 'Create a fill region on the PCB',
 			inputShape: withDocumentParam({
-				layer: z.string().describe('Layer name'),
+				layer: layerParam(LAYER_DESC),
 				polygon: z
 					.array(z.union([z.string(), z.number()]))
-					.describe('Polygon source array, e.g. ["L", x1, y1, x2, y2, ..., x1, y1]'),
+					.describe('Polygon source array in EasyEDA L-mode order: [x1, y1, "L", x2, y2, ..., x1, y1] — coordinates of the first point, then the "L" token, then the remaining points (closed: last point repeats the first)'),
 				net: z.string().optional().describe('Net name'),
 				lineWidth: z.number().optional().describe('Line width'),
 			}),
@@ -159,10 +164,10 @@ export function writeTools(ctx: ToolContext): ToolDef[] {
 			name: 'pcb_create_region',
 			description: 'Create a design rule region (keepout/constraint area) on the PCB',
 			inputShape: withDocumentParam({
-				layer: z.string().describe('Layer name'),
+				layer: layerParam(LAYER_DESC),
 				polygon: z
 					.array(z.union([z.string(), z.number()]))
-					.describe('Polygon source array, e.g. ["L", x1, y1, x2, y2, ..., x1, y1]'),
+					.describe('Polygon source array in EasyEDA L-mode order: [x1, y1, "L", x2, y2, ..., x1, y1] — coordinates of the first point, then the "L" token, then the remaining points (closed: last point repeats the first)'),
 				ruleType: z.array(z.string()).optional().describe('Rule type(s) for the region'),
 				regionName: z.string().optional().describe('Name for the region'),
 				lineWidth: z.number().optional().describe('Outline width'),
@@ -183,7 +188,7 @@ export function writeTools(ctx: ToolContext): ToolDef[] {
 				x: z.number().optional().describe('New X coordinate'),
 				y: z.number().optional().describe('New Y coordinate'),
 				rotation: z.number().optional().describe('New rotation angle in degrees'),
-				layer: z.string().optional().describe('Target layer ("TopLayer" or "BottomLayer")'),
+				layer: layerParam('Target layer: "TopLayer"/1 or "BottomLayer"/2').optional(),
 				primitiveLock: z.boolean().optional().describe('Whether to lock the component'),
 				designator: z.string().optional().describe('New designator (e.g. "R1", "U2")'),
 			}),
@@ -199,7 +204,7 @@ export function writeTools(ctx: ToolContext): ToolDef[] {
 			inputShape: withDocumentParam({
 				primitiveId: z.string().describe('The track primitive ID'),
 				net: z.string().optional().describe('New net name'),
-				layer: z.string().optional().describe('New layer'),
+				layer: layerParam(LAYER_DESC).optional(),
 				startX: z.number().optional().describe('New start X'),
 				startY: z.number().optional().describe('New start Y'),
 				endX: z.number().optional().describe('New end X'),

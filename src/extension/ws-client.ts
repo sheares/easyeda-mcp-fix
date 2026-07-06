@@ -17,6 +17,7 @@ import { pcbPrimitiveHandlers } from './handlers/pcb-primitive';
 import { editorHandlers } from './handlers/editor';
 import { fileManagerHandlers } from './handlers/file-manager';
 import { describeError, setBridgeLogEmitter } from './diag';
+import { normalizePcbParams } from './handlers/pcb-params';
 
 // Single bridge daemon owns the WebSocket port. No more scanning.
 // 16168 is one above the legacy 15168-15207 scan range — chosen so the
@@ -273,6 +274,10 @@ function handleMessage(extensionUuid: string, event: MessageEvent<any>): void {
 			return;
 		}
 
+		// Bug 5: layer names must become numeric EPCB_LayerId before reaching
+		// eda.* calls, or EasyEDA stores dead string ids (see pcb-params.ts).
+		const normalizedParams = normalizePcbParams(method, handlerParams);
+
 		// Auto-switch document if specified, then validate doc type, then run handler.
 		const switchDoc: Promise<unknown> = document
 			? (async () => {
@@ -307,7 +312,7 @@ function handleMessage(extensionUuid: string, event: MessageEvent<any>): void {
 		switchDoc.then(
 			() => requireDocumentType(method).then(
 				() =>
-					handler(handlerParams).then(
+					handler(normalizedParams).then(
 						(result) => sendResponse(extensionUuid, id!, applyQueryParams(result, qp)),
 						(err: any) => {
 							sendResponse(extensionUuid, id!, undefined, describeError(err));
