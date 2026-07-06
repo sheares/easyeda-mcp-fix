@@ -1,8 +1,15 @@
 {
 	"name": "easyeda-agent-mcp-server",
 	"version": "1.0.0",
-	"description": "MCP Server + EDA Pro Extension - Connect Claude Code to EasyEDA Pro",
+	"description": "Bug-fix fork of the EasyEDA Pro MCP bridge. Resolves silent BOM wipes, dead copper to SMD pads and five-minute netlist hangs.",
 	"private": true,
+	"license": "MIT",
+	"repository": {
+		"type": "git",
+		"url": "https://github.com/sheares/easyeda-mcp-fix.git"
+	},
+	"homepage": "https://github.com/sheares/easyeda-mcp-fix#readme",
+	"bugs": "https://github.com/sheares/easyeda-mcp-fix/issues",
 	"scripts": {
 		"compile": "rimraf ./dist/ && ts-node ./config/esbuild.prod.ts",
 		"build": "npm run compile && ts-node ./build/packaged.ts",
