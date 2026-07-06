@@ -1,4 +1,5 @@
-import { fetchParsedNetlist, invalidateNetlistCache, resolveTemplateExpressions, type ParsedNetlist } from './sch-netlist-utils';
+import { fetchParsedNetlist, invalidateNetlistCache, resolveTemplateExpressions } from './sch-netlist-utils';
+import type { ParsedNetlist } from './sch-netlist-parse';
 import { preserveMetadataOnModify, BASE_METADATA_PRESERVE_FIELDS } from './preserve-metadata';
 
 /**

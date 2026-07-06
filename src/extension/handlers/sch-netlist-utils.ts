@@ -1,32 +1,5 @@
 import { bridgeLog, describeError } from '../diag';
-
-export interface ParsedNetlistComponent {
-	designator: string;
-	part: string;
-	manufacturerPart: string;
-	allProps: Record<string, any>; // all raw properties from the netlist
-	pins: Record<string, string>; // pinNumber → netName
-}
-
-// Keyed by component uniqueId
-export type ParsedNetlist = Record<string, ParsedNetlistComponent>;
-
-function parseRawNetlist(raw: unknown): ParsedNetlist {
-	const data: Record<string, any> = typeof raw === 'string' ? JSON.parse(raw) : (raw as any);
-	const result: ParsedNetlist = {};
-	for (const [uniqueId, entry] of Object.entries(data ?? {})) {
-		if (!entry || typeof entry !== 'object') continue;
-		const props = (entry as any).props || {};
-		result[uniqueId] = {
-			designator: props.Designator || '',
-			part: props.Name || '',
-			manufacturerPart: props['Manufacturer Part'] || '',
-			allProps: props,
-			pins: (entry as any).pins || {},
-		};
-	}
-	return result;
-}
+import { parseRawNetlist, type ParsedNetlist } from './sch-netlist-parse';
 
 // EDA Pro's getNetlist() recomputes the whole-project netlist and can take tens
 // of seconds on large boards (see bug 4). The result only changes when the
@@ -60,6 +33,35 @@ export function invalidateNetlistCache(): void {
 	netlistCache = null;
 }
 
+/**
+ * Fetch the raw project netlist as a string.
+ *
+ * Prefers the modern `SCH_ManufactureData.getNetlistFile` API. The older
+ * `eda.sch_Netlist.getNetlist` is `@deprecated` and, on some projects, hangs for
+ * ~5 minutes then rejects with nothing (bug 4): the deprecated call appears to
+ * trigger a blocking JLC reconciliation that never resolves headlessly, even
+ * though DRC and the UI "Export Netlist" (which uses getNetlistFile) both finish
+ * in ~1s on the same project. We keep the JLCEDA netlist type so the payload
+ * shape matches `parseRawNetlist`, and fall back to the deprecated call only if
+ * the new API is missing on this EDA Pro build.
+ */
+export async function fetchRawNetlist(type?: ESYS_NetlistType): Promise<string> {
+	const netlistType = type ?? ESYS_NetlistType.JLCEDA_PRO;
+	const mfg: any = (eda as any).sch_ManufactureData;
+	if (mfg?.getNetlistFile) {
+		const t = Date.now();
+		const file = await mfg.getNetlistFile('netlist', netlistType);
+		if (!file) throw new Error('getNetlistFile returned no file');
+		const text: string = await file.text();
+		bridgeLog(
+			`getNetlistFile(${netlistType}): ${text.length} chars in ${Date.now() - t}ms; head=${JSON.stringify(text.slice(0, 160))}`,
+		);
+		return text;
+	}
+	bridgeLog('getNetlistFile unavailable; using deprecated getNetlist');
+	return eda.sch_Netlist.getNetlist(netlistType);
+}
+
 export async function fetchParsedNetlist(forceRefresh = false): Promise<ParsedNetlist> {
 	const projectUuid = await currentProjectUuid();
 	const now = Date.now();
@@ -81,7 +83,7 @@ export async function fetchParsedNetlist(forceRefresh = false): Promise<ParsedNe
 		const t0 = Date.now();
 		bridgeLog(`getNetlist: start (project=${projectUuid ?? 'unknown'}, forceRefresh=${forceRefresh})`);
 		try {
-			const raw = await eda.sch_Netlist.getNetlist(ESYS_NetlistType.JLCEDA_PRO);
+			const raw = await fetchRawNetlist();
 			const parsed = parseRawNetlist(raw);
 			netlistCache = { projectUuid, parsed, fetchedAt: Date.now() };
 			bridgeLog(`getNetlist: done in ${Date.now() - t0}ms (${Object.keys(parsed).length} components)`);

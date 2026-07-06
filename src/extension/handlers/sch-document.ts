@@ -1,4 +1,4 @@
-import { fetchParsedNetlist, fetchPinNames, invalidateNetlistCache } from './sch-netlist-utils';
+import { fetchParsedNetlist, fetchPinNames, fetchRawNetlist, invalidateNetlistCache } from './sch-netlist-utils';
 
 export const schDocumentHandlers: Record<string, (params: Record<string, any>) => Promise<any>> = {
 	'sch.document.save': async () => {
@@ -17,8 +17,10 @@ export const schDocumentHandlers: Record<string, (params: Record<string, any>) =
 		return eda.sch_Drc.check(params.strict, params.userInterface, true);
 	},
 
+	// Routed through getNetlistFile: the direct eda.sch_Netlist.getNetlist call is
+	// deprecated and can hang ~5 minutes before rejecting with nothing (bug 4).
 	'sch.netlist.get': async (params) => {
-		return eda.sch_Netlist.getNetlist(params.type);
+		return fetchRawNetlist(params.type);
 	},
 
 	'sch.netlist.set': async (params) => {
