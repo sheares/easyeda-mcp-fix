@@ -1,4 +1,5 @@
 import { fetchParsedNetlist, fetchPinNames, fetchRawNetlist, invalidateNetlistCache } from './sch-netlist-utils';
+import { forEachSchematicPage } from './sch-page-walk';
 
 export const schDocumentHandlers: Record<string, (params: Record<string, any>) => Promise<any>> = {
 	'sch.document.save': async () => {
@@ -13,8 +14,23 @@ export const schDocumentHandlers: Record<string, (params: Record<string, any>) =
 	// boolean indicating whether or not DRC passed. Added in the @jlceda/pro-api-types NPM
 	// package but not yet documented on
 	// https://prodocs.easyeda.com/en/api/reference/pro-api.sch_drc.check.html
+	//
+	// Upstream pro-api-sdk issue #27: despite the typed Promise<Array>, some
+	// EDA Pro builds return a plain pass/fail boolean at runtime. Normalise
+	// both shapes so callers always get { passed, errors? } instead of
+	// trusting a shape the runtime may not honour.
 	'sch.drc.check': async (params) => {
-		return eda.sch_Drc.check(params.strict, params.userInterface, true);
+		const result: any = await eda.sch_Drc.check(params.strict, params.userInterface, true);
+		if (typeof result === 'boolean') {
+			return {
+				passed: result,
+				note: 'This EDA Pro build returned only a pass/fail boolean (upstream pro-api-sdk issue #27); per-violation detail is unavailable here. Check the DRC panel in the EasyEDA UI for specifics.',
+			};
+		}
+		if (Array.isArray(result)) {
+			return { passed: result.length === 0, errors: result };
+		}
+		return result;
 	},
 
 	// Routed through getNetlistFile: the direct eda.sch_Netlist.getNetlist call is
@@ -38,22 +54,38 @@ export const schDocumentHandlers: Record<string, (params: Record<string, any>) =
 			? new Set(params.nets as string[])
 			: undefined;
 
-		// 1. Fetch parsed netlist and all components
-		const [netlist, allComponents] = await Promise.all([
-			fetchParsedNetlist(params.refresh === true),
-			(eda.sch_PrimitiveComponent as any).getAll('part', true),
-		]);
+		// 1. Fetch the parsed netlist (project-wide by construction) in parallel
+		// with a project-wide component walk. The old getAll('part', true) call
+		// here silently returned only the active page (EDA Pro ignores the
+		// allSchematicPages flag, bug 2), so on multi-page projects, off-page
+		// components vanished from connectivity output and BFS could not
+		// traverse through them (P1). Pin names are fetched per page while that
+		// page is active, because getAllPinsByPrimitiveId is not verified to
+		// resolve primitives on non-active pages. This over-fetches pins for
+		// designator-filtered queries, but the calls are in-process and the
+		// whole-schematic case needed every pin anyway.
+		const netlistPromise = fetchParsedNetlist(params.refresh === true);
+		// Swallow a standalone rejection: if the page walk throws before we
+		// await this, the parallel promise would otherwise surface as an
+		// unhandled rejection. The real await below still sees the error.
+		netlistPromise.catch(() => { /* handled at the await below */ });
 
-		// 2. Build uniqueId → primitiveId map and designator → uniqueId map
+		// 2. Build uniqueId → primitiveId and uniqueId → pin-name maps
 		const uniqueToPrimitive: Record<string, string> = {};
-		if (Array.isArray(allComponents)) {
-			for (const comp of allComponents) {
-				const c = comp as any;
-				if (c.uniqueId && c.primitiveId) {
-					uniqueToPrimitive[c.uniqueId] = c.primitiveId;
-				}
-			}
-		}
+		const pinNamesMap: Record<string, Record<string, string>> = {}; // uniqueId → pinNumber → pinName
+		await forEachSchematicPage(async () => {
+			const pageComponents = await eda.sch_PrimitiveComponent.getAll(ESCH_PrimitiveComponentType.COMPONENT, false);
+			if (!Array.isArray(pageComponents)) return;
+			await Promise.all(
+				pageComponents.map(async (comp: any) => {
+					if (!comp?.uniqueId || !comp?.primitiveId) return;
+					uniqueToPrimitive[comp.uniqueId] = comp.primitiveId;
+					pinNamesMap[comp.uniqueId] = await fetchPinNames(comp.primitiveId);
+				}),
+			);
+		});
+
+		const netlist = await netlistPromise;
 
 		// 2b. If depth > 1 and designators specified, expand designator set by BFS through $-prefixed nets
 		if (designatorFilter && depth > 1) {
@@ -98,22 +130,6 @@ export const schDocumentHandlers: Record<string, (params: Record<string, any>) =
 				frontier = nextFrontier;
 			}
 		}
-
-		// 3. Fetch pin names for each component in parallel
-		const pinNamesMap: Record<string, Record<string, string>> = {}; // uniqueId → pinNumber → pinName
-		const fetchPromises: Promise<void>[] = [];
-		for (const [uniqueId, entry] of Object.entries(netlist)) {
-			const primitiveId = uniqueToPrimitive[uniqueId];
-			if (!primitiveId) continue;
-			// If filtering by designator, skip components not in the filter
-			if (designatorFilter && !designatorFilter.has(entry.designator)) continue;
-			fetchPromises.push(
-				fetchPinNames(primitiveId).then((names) => {
-					pinNamesMap[uniqueId] = names;
-				}),
-			);
-		}
-		await Promise.all(fetchPromises);
 
 		// 4. Build nets view: netName → ["designator.pinNumber(pinName)", ...]
 		const netsView: Record<string, string[]> = {};

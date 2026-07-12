@@ -1,6 +1,7 @@
 import { fetchParsedNetlist, invalidateNetlistCache, resolveTemplateExpressions } from './sch-netlist-utils';
 import type { ParsedNetlist } from './sch-netlist-parse';
 import { preserveMetadataOnModify, BASE_METADATA_PRESERVE_FIELDS } from './preserve-metadata';
+import { forEachSchematicPage } from './sch-page-walk';
 
 /**
  * Resolve ={...} template expressions in all string fields of a component
@@ -134,6 +135,8 @@ export const schComponentHandlers: Record<string, (params: Record<string, any>) 
 		return result;
 	},
 
+	// No backup here: the daemon-layer sch_delete_component tool snapshots the
+	// document before dispatching, and it is the only route to this handler.
 	'sch.component.delete': async (params) => {
 		const result = await eda.sch_PrimitiveComponent.delete(params.ids);
 		invalidateNetlistCache();
@@ -184,47 +187,16 @@ export const schComponentHandlers: Record<string, (params: Record<string, any>) 
 		let components: any[];
 		if (params.allSchematicPages) {
 			// EDA Pro ignores the flag on the native getAll(type, allSchematicPages)
-			// call — it only ever returns the active page — so walk the pages
-			// ourselves via openDocument and union the results.
-			const pages: any = await eda.dmt_Schematic.getAllSchematicPagesInfo();
-			const currentPage: any = await eda.dmt_Schematic.getCurrentSchematicPageInfo();
-			const originalUuid = currentPage?.uuid;
-
-			components = [];
-			try {
-				if (Array.isArray(pages)) {
-					for (const page of pages) {
-						const uuid = page?.uuid;
-						if (!uuid) continue;
-						await eda.dmt_EditorControl.openDocument(uuid);
-						// Confirm the open actually landed on the target page. A
-						// failed open leaves the editor on the previous page, and
-						// re-reading it would duplicate that page's components into
-						// the union — abort loudly instead.
-						const active: any = await eda.dmt_Schematic.getCurrentSchematicPageInfo();
-						if (active?.uuid !== uuid) {
-							throw new Error(
-								`Failed to open schematic page ${uuid} (still on ${active?.uuid ?? 'unknown'}); aborting multi-page scan to avoid duplicated components.`,
-							);
-						}
-						const pageComponents = await eda.sch_PrimitiveComponent.getAll(params.componentType, false);
-						if (Array.isArray(pageComponents)) {
-							components.push(...pageComponents);
-						}
-					}
-				} else {
-					components = (await eda.sch_PrimitiveComponent.getAll(params.componentType, false)) as any[];
+			// call — it only ever returns the active page — so walk the pages via
+			// the shared helper and union the results.
+			const all: any[] = [];
+			await forEachSchematicPage(async () => {
+				const pageComponents = await eda.sch_PrimitiveComponent.getAll(params.componentType, false);
+				if (Array.isArray(pageComponents)) {
+					all.push(...pageComponents);
 				}
-			} finally {
-				// Always restore the user's original page, even if a page open
-				// failed mid-walk. Best-effort: a restore failure must not mask
-				// the original error.
-				if (originalUuid) {
-					try {
-						await eda.dmt_EditorControl.openDocument(originalUuid);
-					} catch { /* leave the editor where it is rather than mask the throw */ }
-				}
-			}
+			});
+			components = all;
 		} else {
 			components = (await eda.sch_PrimitiveComponent.getAll(params.componentType, false)) as any[];
 		}
