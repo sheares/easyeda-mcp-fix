@@ -29,13 +29,6 @@ import { editorTools } from './tools/editor-tools';
 import { fileManagerTools } from './tools/file-manager-tools';
 import { schemaTools } from './tools/schema-tools';
 
-// NOTE: pour-fill-tools, pcb-document-tools, and pcb-primitive-tools exist
-// on disk but are NOT in the active registration list — they're WIP/alternate
-// implementations that the old MCP server never registered either (the old
-// index.ts called only the modules below). Several of their tool names
-// duplicate names in write-tools / analysis-tools, so adding them would
-// throw at startup. If they're ever wanted, rename or merge them in first.
-
 interface RegistryEntry {
 	def: ToolDef;
 	descriptor: ToolDescriptor;

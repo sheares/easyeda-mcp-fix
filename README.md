@@ -52,17 +52,23 @@ Deliberate limits, kept honest:
   not reassign a primitive across schematic pages; empirically confirmed
   by trying it and catching the underlying `undefined.getState_ComponentType`.
   Cross-page moves still require manual UI Cut, switch page, Paste.
-- **WebSocket authentication (audit item C4).** The daemon only checks
-  the `Origin` header, which any local process can spoof. Local-only
-  threat model, still the last open critical. See
-  [`AUDIT.md`](AUDIT.md#c4-ws-listener-has-no-authentication).
 
 ## Security audit
 
 [`AUDIT.md`](AUDIT.md) documents the whole codebase across the three layers
 (MCP server, bridge daemon, EDA Pro extension) with severity ratings.
-Seven criticals were identified; six are resolved on this branch. C4 is
-the last one open.
+Seven criticals were identified; all seven are resolved on this branch.
+
+C4 (WebSocket authentication) works as a challenge-response: the daemon
+writes a per-run random token (mode 0600, inside its 0700 state dir) and
+challenges every extension connection to read it back, proving the peer
+runs as the same user. A wrong answer always closes the socket. By default
+a connection that *cannot* read the token (the browser web app, or a
+desktop install without the extension's external interaction permission)
+is still accepted on Origin trust, matching pre-C4 behaviour. Set
+`EDA_WS_AUTH=require` in the daemon's environment to refuse
+unauthenticated connections entirely (hardened mode; desktop client only,
+and the extension's external interaction permission must be enabled).
 
 ## Install
 
@@ -70,7 +76,7 @@ the last one open.
 git clone https://github.com/sheares/easyeda-mcp-fix.git
 cd easyeda-mcp-fix
 npm install
-npm test              # 69 tests
+npm test              # 84 tests
 npm run build         # produces build/dist/easyeda-agent-mcp-server_vN.N.N.eext
 ```
 
@@ -111,7 +117,7 @@ src/
   lib/           schematic editing library (start at src/lib/README.md)
 docs/            .esch / .epcb / .epro file format reference
 examples/        working examples using the editing library
-tests/           69 tests (node --test, ts-node)
+tests/           84 tests (node --test, ts-node)
 ```
 
 ## Two distinct pieces
@@ -148,7 +154,11 @@ because EasyEDA's per-operation API is too slow for bulk edits; the
 library lets you pull the document source, modify it locally, and push it
 back in a single round trip.
 
-It's not wired into MCP tools yet (intentional). The intended workflow:
+Its Zod schemas ARE wired into the MCP tools: `document_set_source` and
+`document_load_from_file` uploads are validated against them (strict by
+default), and `document_validate` exposes the check directly (see
+`src/bridge-daemon/tools/schema-tools.ts`). The writer API itself is not
+exposed as MCP tools (intentional); the intended workflow:
 
 ```
 1. project_export_file → /tmp/myproject.epro

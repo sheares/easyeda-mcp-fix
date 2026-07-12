@@ -3,15 +3,15 @@
 	"uuid": "0d3d35b927d9451ba42c527576079161",
 	"displayName": "EasyEDA Agent",
 	"description": "MCP Bridge - Connect Claude Code to EasyEDA Pro",
-	"version": "1.1.11",
-	"publisher": "",
+	"version": "1.2.0",
+	"publisher": "sheares",
 	"engines": {
-		"eda": "^2.3.0"
+		"eda": "^2.2.47"
 	},
 	"license": "MIT",
 	"repository": {
 		"type": "git",
-		"url": ""
+		"url": "https://github.com/sheares/easyeda-mcp-fix.git"
 	},
 	"categories": "Other",
 	"keywords": ["MCP", "Claude", "PCB", "Optimizer"],

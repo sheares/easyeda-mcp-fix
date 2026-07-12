@@ -22,5 +22,13 @@
 /tsconfig.json
 /release/
 /dist/mcp-server/
+/dist/bridge-daemon/
+/tests/
+/docs/
+/examples/
 /.edaignore
+/AUDIT.md
+HANDOVER*.md
+/tsconfig.extension.json
+.DS_Store
 debug.log
