@@ -9,6 +9,13 @@ import {
 	LineStyleLine,
 	TextLine,
 	CircleLine,
+	RectLine,
+	EllipseLine,
+	ArcLine,
+	PolyLine,
+	TableLine,
+	TabelCellLine,
+	ObjLine,
 } from './line-graphics';
 import { parseNdjsonSource, serializeParsedLines } from './parser';
 import type { ParsedLine, ValidationReport } from './types';
@@ -23,6 +30,13 @@ export const EschLine = z.union([
 	LineStyleLine,
 	TextLine,
 	CircleLine,
+	RectLine,
+	EllipseLine,
+	ArcLine,
+	PolyLine,
+	TableLine,
+	TabelCellLine,
+	ObjLine,
 ]);
 
 export type EschLine = z.infer<typeof EschLine>;
@@ -37,6 +51,15 @@ const ESCH_SCHEMAS = {
 	LINESTYLE: LineStyleLine,
 	TEXT: TextLine,
 	CIRCLE: CircleLine,
+	// Annotation graphics: title blocks and drawing frames use these in .esch
+	// (rect/table/cell/obj borders, logos), not just .esym.
+	RECT: RectLine,
+	ELLIPSE: EllipseLine,
+	ARC: ArcLine,
+	POLY: PolyLine,
+	TABLE: TableLine,
+	TABEL_CELL: TabelCellLine,
+	OBJ: ObjLine,
 };
 
 export function parseEschSource(source: string): {

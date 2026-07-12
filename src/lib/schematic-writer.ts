@@ -57,6 +57,13 @@ export class SchematicWriter {
 	private appendedLines: ParsedLine<EschLine>[] = [];
 	/** Line indices in `lines` to skip on serialize. */
 	private removedLineIndices = new Set<number>();
+	/**
+	 * Element ids created as part of the same logical operation as another
+	 * element (junction wires, net-attr wires), keyed by the owning element id.
+	 * removeElement removes them along with their owner; otherwise they would
+	 * survive as invisible zero-length wires that still merge nets.
+	 */
+	private companionIds = new Map<string, string[]>();
 	private nextElementId: number;
 	private nextGgeId: number;
 	private nextDesignatorNum: Record<string, number> = {};
@@ -165,8 +172,9 @@ export class SchematicWriter {
 
 	/**
 	 * Add a netport at a specific position.
+	 * @returns the netport's component element id (usable with removeElement)
 	 */
-	addNetportAt(netName: string, x: number, y: number, rotation: number): void {
+	addNetportAt(netName: string, x: number, y: number, rotation: number): string {
 		const np = this.model.palette.netport;
 		if (!np) throw new Error('No netport template found in schematic palette');
 
@@ -211,33 +219,39 @@ export class SchematicWriter {
 				visible: 0, trailingSlot5: 0, x, y, trailingSlot9: 90, fontStyleId: 'st4',
 			}),
 		);
+		this.companionIds.set(compId, [wireId]);
+		return compId;
 	}
 
 	/**
 	 * Add a netport connected to a specific component pin.
 	 * Automatically computes position and rotation.
+	 * @returns the netport's component element id (usable with removeElement)
 	 */
-	addNetport(netName: string, pinRef: string): void {
+	addNetport(netName: string, pinRef: string): string {
 		const found = this.findPin(pinRef);
 		if (!found) throw new Error(`Pin not found: ${pinRef}`);
 		const { pin } = found;
 
 		const rotation = this.netportRotationForPin(pin);
-		this.addNetportAt(netName, pin.worldX, pin.worldY, rotation);
+		return this.addNetportAt(netName, pin.worldX, pin.worldY, rotation);
 	}
 
 	/**
 	 * Add a zero-length junction wire at a point.
 	 * Required when two component pins overlap to create an electrical connection.
+	 * @returns the junction wire's element id (usable with removeElement)
 	 */
-	addJunctionWire(x: number, y: number): void {
+	addJunctionWire(x: number, y: number): string {
+		const wireId = this.allocId();
 		this.appendedLines.push(
 			makeWireLine({
-				elementId: this.allocId(),
+				elementId: wireId,
 				segments: [[x, y, x, y]],
 				lineStyleId: this.model.palette.wireLineStyle,
 			}),
 		);
+		return wireId;
 	}
 
 	/**
@@ -247,8 +261,9 @@ export class SchematicWriter {
 	 * @param x - World X position
 	 * @param y - World Y position
 	 * @param rotation - Rotation (0/90/180/270)
+	 * @returns the component's element id (usable with removeElement)
 	 */
-	addComponent(partName: string, designator: string, x: number, y: number, rotation: number = 0): void {
+	addComponent(partName: string, designator: string, x: number, y: number, rotation: number = 0): string {
 		const template = this.model.palette.components[partName];
 		if (!template) throw new Error(`Part "${partName}" not found in schematic palette. Available: ${Object.keys(this.model.palette.components).join(', ')}`);
 
@@ -303,6 +318,7 @@ export class SchematicWriter {
 				visible: 0, trailingSlot5: 0, trailingSlot9: 0, fontStyleId: 'st4',
 			}),
 		);
+		return compId;
 	}
 
 	/**
@@ -315,8 +331,10 @@ export class SchematicWriter {
 	 * @param pinRef - Pin reference (e.g., "U2.16" or "U2:TCK")
 	 * @param netName - Net name for the netport
 	 * @param designator - Resistor designator (e.g., "R25"). Auto-allocated if omitted.
+	 * @returns the resistor's element id (usable with removeElement; the pin
+	 *   junction wire is registered as its companion and removed with it)
 	 */
-	addSeriesResistor(partName: string, pinRef: string, netName: string, designator?: string): void {
+	addSeriesResistor(partName: string, pinRef: string, netName: string, designator?: string): string {
 		if (!designator) designator = this.allocDesignator('R');
 		const found = this.findPin(pinRef);
 		if (!found) throw new Error(`Pin not found: ${pinRef}`);
@@ -374,20 +392,24 @@ export class SchematicWriter {
 		}
 
 		// Add the resistor
-		this.addComponent(partName, designator, resCenterX, resCenterY, resRotation);
+		const resId = this.addComponent(partName, designator, resCenterX, resCenterY, resRotation);
 
 		// Add junction wire at the IC pin / resistor connection point
-		this.addJunctionWire(pin.worldX, pin.worldY);
+		const junctionId = this.addJunctionWire(pin.worldX, pin.worldY);
+		this.companionIds.set(resId, [junctionId]);
 
 		// Add netport at the other end
 		const netportRotation = this.netportRotationForPin(pin);
 		this.addNetportAt(netName, netportX, netportY, netportRotation);
+		return resId;
 	}
 
 	/**
 	 * Add a power symbol (GND, VCC, etc.) to a component pin.
+	 * @returns the power symbol's component element id (usable with
+	 *   removeElement; its junction wire and net wire are removed with it)
 	 */
-	addPowerSymbol(railName: string, pinRef: string): void {
+	addPowerSymbol(railName: string, pinRef: string): string {
 		const found = this.findPin(pinRef);
 		if (!found) throw new Error(`Pin not found: ${pinRef}`);
 		const { pin } = found;
@@ -425,7 +447,7 @@ export class SchematicWriter {
 		);
 
 		// Junction wire at the pin
-		this.addJunctionWire(pin.worldX, pin.worldY);
+		const junctionId = this.addJunctionWire(pin.worldX, pin.worldY);
 
 		// Wire with NET attr
 		const wireId = this.allocId();
@@ -441,10 +463,15 @@ export class SchematicWriter {
 				visible: 0, trailingSlot5: 0, x: pin.worldX, y: pin.worldY, trailingSlot9: 90, fontStyleId: 'st4',
 			}),
 		);
+		this.companionIds.set(compId, [junctionId, wireId]);
+		return compId;
 	}
 
 	/**
-	 * Remove lines by element ID — removes the element and all ATTRs that reference it.
+	 * Remove lines by element ID — removes the element and all ATTRs that
+	 * reference it. Covers both lines from the original source and lines added
+	 * earlier in this session, and cascades to companion elements (junction
+	 * wires, net wires) created as part of the same add operation.
 	 */
 	removeElement(elementId: string): void {
 		for (const line of this.lines) {
@@ -452,6 +479,21 @@ export class SchematicWriter {
 			const d = line.data;
 			if (d[1] === elementId || d[2] === elementId) {
 				this.removedLineIndices.add(line.lineIndex);
+			}
+		}
+		// Same-session additions live in appendedLines, not lines. Without this
+		// sweep, removing an element added earlier in the session was a silent
+		// no-op.
+		this.appendedLines = this.appendedLines.filter((line) => {
+			if (line.kind !== 'known') return true;
+			const d = line.data;
+			return d[1] !== elementId && d[2] !== elementId;
+		});
+		const companions = this.companionIds.get(elementId);
+		if (companions) {
+			this.companionIds.delete(elementId);
+			for (const companionId of companions) {
+				this.removeElement(companionId);
 			}
 		}
 	}

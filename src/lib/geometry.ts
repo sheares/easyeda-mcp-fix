@@ -198,12 +198,19 @@ export function shapeFromSymbol(
 			));
 		} else if (tag === 'ARC') {
 			// .esym ARC: ["ARC", id, x1, y1, xm, ym, x2, y2, styleId, layer]
-			polygons.push(arcPolygon(
-				d[2] as number, d[3] as number,
-				d[4] as number, d[5] as number,
-				d[6] as number, d[7] as number,
-				o.arcSegments,
-			));
+			// The slot layout is an assumption (ArcLine only pins tag + id; no
+			// real ARC fixture confirms it yet), so guard every read: a malformed
+			// ARC must be skipped, not allowed to push NaNs that poison the
+			// bounding box and silently disable overlap detection.
+			const slots = [d[2], d[3], d[4], d[5], d[6], d[7]];
+			if (slots.every((n) => typeof n === 'number' && Number.isFinite(n))) {
+				polygons.push(arcPolygon(
+					d[2] as number, d[3] as number,
+					d[4] as number, d[5] as number,
+					d[6] as number, d[7] as number,
+					o.arcSegments,
+				));
+			}
 		} else if (tag === 'POLY') {
 			const pts = d[2] as number[];
 			const closedRaw = d[3] as boolean | number;
