@@ -13,6 +13,8 @@ export const schWireHandlers: Record<string, (params: Record<string, any>) => Pr
 		return result;
 	},
 
+	// No backup here: the daemon-layer sch_delete_wire tool snapshots the
+	// document before dispatching, and it is the only route to this handler.
 	'sch.wire.delete': async (params) => {
 		const result = await eda.sch_PrimitiveWire.delete(params.ids);
 		invalidateNetlistCache();

@@ -3,7 +3,7 @@ import { readFile, writeFile, mkdir } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import type { ToolDef, ToolContext } from '../types';
 import { withInstanceParam, withDocumentParam } from './query-params';
-import { backupDocument, backupProject, type BackupResult } from '../backup';
+import { backupDocument, backupProject, formatBackupSummary, type BackupResult } from '../backup';
 import { validateByDocType, type DocumentContext } from './schema-tools';
 import type { ValidationReport } from '../../lib/schema';
 
@@ -51,9 +51,6 @@ const ValidateMode = z.enum(['off', 'warn', 'strict']);
 type ValidateMode = z.infer<typeof ValidateMode>;
 const UPLOAD_VALIDATE_DEFAULT: ValidateMode = 'strict';
 
-function formatBackupSummary(backup: BackupResult): string {
-	return `Backed up prior state to ${backup.repo} @ ${backup.sha}${backup.changed ? '' : ' (unchanged from previous backup)'} — path: ${backup.path}`;
-}
 
 /** Returns an abort reason string if validation should block the upload, else null. */
 function abortReason(mode: ValidateMode, report: ValidationReport): string | null {

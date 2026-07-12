@@ -4,6 +4,16 @@ const documentDescription =
 	'Target document UUID — auto-switches to this document before executing. Get UUIDs from list_instances or editor_get_open_tabs.';
 
 /**
+ * Shared coordinate blurb for PCB tools (H6). Units verified against
+ * @jlceda/pro-api-types remarks: PCB/footprint canvas coordinates are in mil
+ * (schematic/symbol canvases use 0.01 inch); the API system data unit is mil
+ * and does not change. Axis direction matches the verified schematic
+ * convention in docs/schematic-format.md.
+ */
+export const PCB_COORD_NOTE =
+	'Coordinates are PCB canvas coordinates in mil (1 mil = 0.001 inch), relative to the canvas origin: +X = rightward, +Y = upward. Lengths (widths, diameters) are also in mil. Use pcb_canvas_origin to read/set the origin offset and pcb_convert_coordinates to convert between canvas and data coordinates.';
+
+/**
  * Instance ID parameter — added to every tool to support multi-instance routing.
  */
 export const instanceParam = {

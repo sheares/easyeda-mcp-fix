@@ -125,7 +125,8 @@ export function libTools(ctx: ToolContext): ToolDef[] {
 
 		{
 			name: 'lib_symbol_delete',
-			description: 'Delete a library symbol. Returns boolean success.',
+			description:
+				'Delete a library symbol. IRREVERSIBLE: no undo, and no backup snapshot is taken (library assets are not documents). Fetch and save the symbol source with lib_symbol_get first if you may need to restore it. Returns boolean success.',
 			inputShape: withInstanceParam({
 				symbolUuid: z.string().describe('Symbol UUID'),
 				libraryUuid: z.string().describe('Library UUID containing the symbol'),
@@ -242,7 +243,8 @@ export function libTools(ctx: ToolContext): ToolDef[] {
 
 		{
 			name: 'lib_device_delete',
-			description: 'Delete a library device. Does NOT delete its referenced symbol/footprint. Returns boolean success.',
+			description:
+				'Delete a library device. Does NOT delete its referenced symbol/footprint. IRREVERSIBLE: no undo, and no backup snapshot is taken (library assets are not documents). Record the device data with lib_get_device first if you may need to restore it. Returns boolean success.',
 			inputShape: withInstanceParam({
 				deviceUuid: z.string().describe('Device UUID'),
 				libraryUuid: z.string().describe('Library UUID containing the device'),

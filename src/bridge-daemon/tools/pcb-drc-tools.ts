@@ -64,7 +64,8 @@ export function pcbDrcTools(ctx: ToolContext): ToolDef[] {
 - rename: rename config (originalName, newName)
 - delete: delete config (configurationName)
 - get_default_name: get default config name
-- set_default: set as default (configurationName)`,
+- set_default: set as default (configurationName)
+Warning (upstream EDA bug, pro-api-sdk issue #34): saved rule changes read back correctly but do NOT affect pour reflow until the PCB document is closed and reopened. Reopen the document before rebuilding pours.`,
 			inputShape: withDocumentParam({
 				action: z
 					.enum([
@@ -92,7 +93,8 @@ export function pcbDrcTools(ctx: ToolContext): ToolDef[] {
 - get_net_by_net: get net-by-net clearance rules
 - overwrite_net_by_net: overwrite net-by-net rules (netByNetRules: object)
 - get_region: get region-specific rules
-- overwrite_region: overwrite region rules (regionRules: array of region rule objects)`,
+- overwrite_region: overwrite region rules (regionRules: array of region rule objects)
+Warning (upstream EDA bug, pro-api-sdk issue #34): overwritten rules read back correctly but do NOT affect pour reflow until the PCB document is closed and reopened. Reopen the document before rebuilding pours.`,
 			inputShape: withDocumentParam({
 				action: z
 					.enum(['overwrite_net', 'get_net_by_net', 'overwrite_net_by_net', 'get_region', 'overwrite_region'])

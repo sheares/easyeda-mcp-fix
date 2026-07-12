@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import type { ToolDef, ToolContext } from '../types';
 import { withDocumentParam } from './query-params';
+import { backupDocument, formatBackupSummary } from '../backup';
 
 export function schWriteTools(ctx: ToolContext): ToolDef[] {
 	return [
@@ -116,15 +117,21 @@ export function schWriteTools(ctx: ToolContext): ToolDef[] {
 
 		{
 			name: 'sch_delete_component',
-			description: 'Delete one or more schematic components by their primitive IDs',
+			description:
+				'Delete one or more schematic components by their primitive IDs. Irreversible via this API: there is no undo call. The whole document is snapshotted to the local backup repo first; the response includes the backup SHA for recovery.',
 			inputShape: withDocumentParam({
 				ids: z
 					.union([z.string(), z.array(z.string())])
 					.describe('Single primitive ID or array of primitive IDs to delete'),
 			}),
 			handler: async (params) => {
+				const backup = await backupDocument(ctx, {
+					instance_id: params.instance_id,
+					document: params.document,
+					toolName: 'sch_delete_component',
+				});
 				const result = await ctx.sendToExtension('sch.component.delete', params);
-				return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
+				return { content: [{ type: 'text', text: JSON.stringify({ result, backup, note: formatBackupSummary(backup) }, null, 2) }] };
 			},
 		},
 
@@ -186,15 +193,21 @@ export function schWriteTools(ctx: ToolContext): ToolDef[] {
 
 		{
 			name: 'sch_delete_wire',
-			description: 'Delete one or more wires by their primitive IDs',
+			description:
+				'Delete one or more wires by their primitive IDs. Irreversible via this API: there is no undo call. The whole document is snapshotted to the local backup repo first; the response includes the backup SHA for recovery.',
 			inputShape: withDocumentParam({
 				ids: z
 					.union([z.string(), z.array(z.string())])
 					.describe('Single primitive ID or array of primitive IDs to delete'),
 			}),
 			handler: async (params) => {
+				const backup = await backupDocument(ctx, {
+					instance_id: params.instance_id,
+					document: params.document,
+					toolName: 'sch_delete_wire',
+				});
 				const result = await ctx.sendToExtension('sch.wire.delete', params);
-				return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
+				return { content: [{ type: 'text', text: JSON.stringify({ result, backup, note: formatBackupSummary(backup) }, null, 2) }] };
 			},
 		},
 

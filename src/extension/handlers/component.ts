@@ -29,6 +29,8 @@ export const componentHandlers: Record<string, (params: Record<string, any>) => 
 		);
 	},
 
+	// No backup here: the daemon-layer pcb_delete_primitives tool snapshots the
+	// document before dispatching, and it is the only route to this handler.
 	'pcb.delete.component': async (params) => {
 		return eda.pcb_PrimitiveComponent.delete(params.ids);
 	},

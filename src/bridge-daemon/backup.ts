@@ -121,6 +121,10 @@ export interface BackupResult {
 	changed: boolean;      // false if the content was identical to the prior backup
 }
 
+export function formatBackupSummary(backup: BackupResult): string {
+	return `Backed up prior state to ${backup.repo} @ ${backup.sha}${backup.changed ? '' : ' (unchanged from previous backup)'} — path: ${backup.path}`;
+}
+
 interface DocSourceResponse {
 	source: string;
 	context?: {

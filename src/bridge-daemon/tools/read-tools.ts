@@ -136,7 +136,8 @@ Pad fields: primitiveId, net, layer, padNumber, x, y.`,
 		{
 			name: 'pcb_get_component_pins',
 			description: `Get all pins/pads of a specific component by its primitive ID.
-Pin fields: primitiveId, padNumber, net, layer, x, y.`,
+Pin fields: primitiveId, padNumber, net, layer, x, y.
+Note (upstream EDA bug, pro-api-sdk issue #33): for components placed via the API in the current editing session, padNumber can read back null until the PCB document is closed and reopened.`,
 			inputShape: withQueryParams({
 				primitiveId: z.string().describe('The component primitive ID'),
 			}),

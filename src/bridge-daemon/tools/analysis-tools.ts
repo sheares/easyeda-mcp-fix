@@ -146,7 +146,8 @@ export function analysisTools(ctx: ToolContext): ToolDef[] {
 
 		{
 			name: 'pcb_import_changes',
-			description: 'Import changes from schematic into the PCB (sync schematic to PCB)',
+			description:
+				'Import changes from schematic into the PCB (sync schematic to PCB). Warning (upstream EDA bug, pro-api-sdk issue #33): pads of components newly placed by this call can read back with a null pad number until the PCB document is reloaded, and DRC may report an unstructured "Netlist Error". Close and reopen the PCB document (or reload via editor_open_document) before reading pads of freshly placed components.',
 			inputShape: withDocumentParam({
 				uuid: z.string().optional().describe('Schematic UUID (uses associated schematic if not provided)'),
 			}),
