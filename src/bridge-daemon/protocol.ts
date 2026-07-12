@@ -19,6 +19,12 @@ export function logPath(): string {
 	return join(stateDir(), 'bridge.log');
 }
 
+// Per-run WS auth token (C4). Written 0600 by the daemon at startup; the
+// extension proves it runs as the same user by reading it back when challenged.
+export function wsTokenPath(): string {
+	return join(stateDir(), 'ws-token');
+}
+
 // Browser-extension WS port. Single port now; no more scanning.
 // Picked at 16168 (one above the legacy 15168-15207 scan range) so the
 // new daemon doesn't collide with any stale processes from the old

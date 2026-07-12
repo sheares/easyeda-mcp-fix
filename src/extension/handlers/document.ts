@@ -1,8 +1,10 @@
 export const documentHandlers: Record<string, (params: Record<string, any>) => Promise<any>> = {
 	// === Document ===
 
-	'pcb.document.save': async (params) => {
-		return eda.pcb_Document.save(params.uuid);
+	// save() takes no arguments as of pro-api-types 0.3.5: it saves the active
+	// document, which the request queue's switchToDocument has already selected.
+	'pcb.document.save': async () => {
+		return eda.pcb_Document.save();
 	},
 
 	'pcb.document.navigateTo': async (params) => {

@@ -1,6 +1,6 @@
 {
 	"name": "easyeda-agent-mcp-server",
-	"version": "1.0.0",
+	"version": "1.2.0",
 	"description": "Bug-fix fork of the EasyEDA Pro MCP bridge. Resolves silent BOM wipes, dead copper to SMD pads and five-minute netlist hangs.",
 	"private": true,
 	"license": "MIT",
@@ -17,7 +17,7 @@
 		"typecheck": "npm run typecheck:mcp && npm run typecheck:extension",
 		"typecheck:mcp": "tsc --noEmit",
 		"typecheck:extension": "tsc -p tsconfig.extension.json",
-		"test": "node --require ts-node/register --test tests/roundtrip.test.ts tests/geometry.test.ts tests/symbol-editor.test.ts tests/schematic-reader-flip.test.ts tests/pcb-params.test.ts tests/sch-netlist-parse.test.ts tests/bridge-daemon.test.ts"
+		"test": "node --require ts-node/register --test tests/roundtrip.test.ts tests/geometry.test.ts tests/symbol-editor.test.ts tests/schematic-reader-flip.test.ts tests/schematic-writer.test.ts tests/pcb-params.test.ts tests/sch-netlist-parse.test.ts tests/bridge-daemon.test.ts"
 	},
 	"dependencies": {
 		"@modelcontextprotocol/sdk": "^1.27.1",
@@ -25,7 +25,7 @@
 		"zod": "^4.0.0"
 	},
 	"devDependencies": {
-		"@jlceda/pro-api-types": "^0.2.9",
+		"@jlceda/pro-api-types": "^0.3.5",
 		"@types/fs-extra": "^11.0.4",
 		"@types/node": "^22.13.4",
 		"@types/ws": "^8.5.14",

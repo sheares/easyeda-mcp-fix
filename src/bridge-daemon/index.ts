@@ -22,12 +22,13 @@ import { createServer as createNetServer, type Socket as NetSocket } from 'node:
 import { mkdir, unlink, writeFile, chmod } from 'node:fs/promises';
 import { statSync } from 'node:fs';
 import { createConnection } from 'node:net';
-import { randomBytes } from 'node:crypto';
+import { randomBytes, createHash, timingSafeEqual } from 'node:crypto';
 import {
 	socketPath,
 	pidPath,
 	stateDir,
 	wsPort,
+	wsTokenPath,
 	idleExitSeconds,
 	extensionRequestTimeoutMs,
 	type ClientToDaemon,
@@ -52,6 +53,49 @@ function isAllowedOrigin(origin: string | undefined): boolean {
 	if (!origin) return false;
 	if (process.env.EDA_WS_ALLOW_ALL_ORIGINS === '1') return true;
 	return ALLOWED_ORIGIN_PATTERNS.some((pattern) => pattern.test(origin));
+}
+
+// -----------------------------------------------------------------------------
+// WS auth (C4). The WS port is localhost-only and Origin-checked, but a local
+// process can set any Origin header, so Origin alone cannot distinguish a real
+// EasyEDA extension from a fake one. The daemon writes a per-run random token
+// (0600, inside the 0700 state dir) and challenges every new connection to
+// read it back: only a process running as the same user can. The extension
+// answers via eda.sys_FileSystem.readFileFromFileSystem, which only exists in
+// the desktop client and requires the extension's external interaction
+// permission, so the default policy tolerates a connection that CANNOT read
+// the token (Origin-only trust, the pre-C4 status quo) while always closing
+// one that answers with a WRONG token. Set EDA_WS_AUTH=require to refuse any
+// connection that does not prove token knowledge (hardened; breaks the
+// browser web app and desktop installs without the permission enabled).
+// -----------------------------------------------------------------------------
+const WS_AUTH_REQUIRED = process.env.EDA_WS_AUTH === 'require';
+const WS_AUTH_TIMEOUT_MS = 15_000;
+let wsAuthToken: string | null = null;
+
+function tokenMatches(candidate: string): boolean {
+	if (!wsAuthToken) return false;
+	// Hash both sides to fixed length so timingSafeEqual is applicable and the
+	// comparison leaks nothing about where the strings diverge.
+	const a = createHash('sha256').update(candidate).digest();
+	const b = createHash('sha256').update(wsAuthToken).digest();
+	return timingSafeEqual(a, b);
+}
+
+/**
+ * Returns the token string from an extension auth message, null if the
+ * message is an auth message reporting "could not read the token file", or
+ * undefined if the message is not an auth message at all.
+ */
+function tryParseAuthToken(raw: string): string | null | undefined {
+	try {
+		const msg = JSON.parse(raw);
+		if (msg?.type !== 'auth') return undefined;
+		const t = msg?.data?.token;
+		return typeof t === 'string' ? t : null;
+	} catch {
+		return undefined;
+	}
 }
 
 // Timeout for a single extension RPC round-trip. Multi-page netlist queries
@@ -250,13 +294,16 @@ function disconnectClient(client: McpClient): void {
 // Extension (WS) handling
 // -----------------------------------------------------------------------------
 
+// Merge only defined fields so a partial push (e.g. a tab-switch event fired
+// before the extension could resolve the project name) cannot blank fields the
+// daemon already knows.
 function updateInstanceInfo(instanceId: string, data: Record<string, unknown>): void {
 	const ext = extensions.get(instanceId);
 	if (!ext) return;
-	ext.info.projectName = data.projectName as string | undefined;
-	ext.info.currentDocument = data.currentDocument as string | undefined;
-	ext.info.documentType = data.documentType as string | undefined;
-	ext.info.documents = data.documents as Array<{ title: string; uuid: string }> | undefined;
+	if (data.projectName !== undefined) ext.info.projectName = data.projectName as string;
+	if (data.currentDocument !== undefined) ext.info.currentDocument = data.currentDocument as string;
+	if (data.documentType !== undefined) ext.info.documentType = data.documentType as string;
+	if (data.documents !== undefined) ext.info.documents = data.documents as Array<{ title: string; uuid: string }>;
 }
 
 function handleExtensionMessage(instanceId: string, ws: WebSocket, raw: string): void {
@@ -403,17 +450,56 @@ function startWebSocketServer(): Promise<void> {
 				return;
 			}
 
-			const existing = extensions.get(instanceId);
-			if (existing) {
-				try { existing.ws.close(); } catch { /* noop */ }
-				extensions.delete(instanceId);
+			// A token supplied in the URL is verified up front; a wrong one is
+			// rejected outright, a correct one pre-authenticates the connection.
+			const urlToken = url.searchParams.get('token');
+			if (urlToken !== null && !tokenMatches(urlToken)) {
+				log(`Extension presented an invalid token (instance: ${instanceId}), rejecting`);
+				ws.close(4003, 'invalid token');
+				return;
 			}
+			let authed = urlToken !== null;
+			let registered = false;
 
-			const ext: Extension = { ws, info: { instanceId, connectedAt: Date.now() } };
-			extensions.set(instanceId, ext);
-			log(`Extension connected (instance: ${instanceId})`);
+			const registerExtension = (): void => {
+				const existing = extensions.get(instanceId);
+				if (existing) {
+					try { existing.ws.close(); } catch { /* noop */ }
+					extensions.delete(instanceId);
+				}
+				const ext: Extension = { ws, info: { instanceId, connectedAt: Date.now() } };
+				extensions.set(instanceId, ext);
+				registered = true;
+				log(`Extension connected (instance: ${instanceId})`);
+				ws.send(JSON.stringify({ type: 'hello', agentId: 'daemon' }));
+				requestInstanceInfo(instanceId).catch(() => { /* non-critical */ });
+			};
 
-			ws.on('message', (data) => handleExtensionMessage(instanceId, ws, data.toString()));
+			ws.on('message', (data) => {
+				const raw = data.toString();
+				if (!authed) {
+					const token = tryParseAuthToken(raw);
+					if (token !== undefined) {
+						if (token !== null && tokenMatches(token)) {
+							authed = true;
+							log(`Extension token verified (instance: ${instanceId})`);
+							if (!registered) registerExtension();
+						} else if (token !== null) {
+							log(`Extension answered the token challenge INCORRECTLY (instance: ${instanceId}), closing`);
+							ws.close(4003, 'invalid token');
+						} else if (WS_AUTH_REQUIRED) {
+							log(`Extension could not read the ws-token file (instance: ${instanceId}), closing (EDA_WS_AUTH=require)`);
+							ws.close(4004, 'token required (EDA_WS_AUTH=require)');
+						} else {
+							log(`Extension could not read the ws-token file (instance: ${instanceId}), continuing on Origin trust`);
+						}
+						return;
+					}
+					// Non-auth traffic from a quarantined socket is dropped.
+					if (!registered) return;
+				}
+				handleExtensionMessage(instanceId, ws, raw);
+			});
 
 			ws.on('close', () => {
 				log(`Extension disconnected (instance: ${instanceId})`);
@@ -437,8 +523,24 @@ function startWebSocketServer(): Promise<void> {
 				log(`Extension WS error (instance: ${instanceId}):`, err);
 			});
 
-			ws.send(JSON.stringify({ type: 'hello', agentId: 'daemon' }));
-			requestInstanceInfo(instanceId).catch(() => { /* non-critical */ });
+			// Challenge every connection; the answer only decides anything under
+			// EDA_WS_AUTH=require, but a correct answer is always logged and a
+			// wrong one always closes (see the C4 note above).
+			ws.send(JSON.stringify({ type: 'auth.challenge', tokenPath: wsTokenPath() }));
+
+			if (WS_AUTH_REQUIRED && !authed) {
+				// Quarantine: not registered, no request routing, until the token
+				// challenge is answered correctly.
+				const authTimer = setTimeout(() => {
+					if (!authed && ws.readyState === WebSocket.OPEN) {
+						log(`Extension did not answer the token challenge in ${WS_AUTH_TIMEOUT_MS}ms (instance: ${instanceId}), closing`);
+						ws.close(4005, 'auth timeout');
+					}
+				}, WS_AUTH_TIMEOUT_MS);
+				ws.once('close', () => clearTimeout(authTimer));
+			} else {
+				registerExtension();
+			}
 		});
 
 		wss = server;
@@ -617,7 +719,7 @@ function shutdown(code: number): void {
 		// Await the unlinks — exiting on the next line would abandon them,
 		// leaving a stale socket/pid file that costs every restart an
 		// EADDRINUSE → probe → unlink → rebind cycle.
-		void Promise.allSettled([unlink(socketPath()), unlink(pidPath())])
+		void Promise.allSettled([unlink(socketPath()), unlink(pidPath()), unlink(wsTokenPath())])
 			.then(() => process.exit(code));
 	};
 
@@ -650,6 +752,10 @@ async function main(): Promise<void> {
 	// mkdir's mode is subject to umask. Best-effort — don't abort startup.
 	await chmod(stateDir(), 0o700).catch((err) => log('chmod state dir failed:', err));
 	await bindUdsWithSingletonCheck();
+	// Per-run WS auth token (C4): written after the singleton check so a
+	// second daemon start cannot clobber the running daemon's token.
+	wsAuthToken = randomBytes(32).toString('hex');
+	await writeFile(wsTokenPath(), wsAuthToken, { mode: 0o600 });
 	await startWebSocketServer();
 	await writeFile(pidPath(), String(process.pid));
 	log(`Daemon started (pid ${process.pid}, idle-exit ${idleExitSeconds()}s, tools=${registry.listDescriptors().length})`);

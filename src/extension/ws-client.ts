@@ -240,6 +240,71 @@ async function requireDocumentType(method: string): Promise<void> {
 	}
 }
 
+// ---------------------------------------------------------------------------
+// H11: request serialisation. switchDoc → requireDocumentType → handler is a
+// multi-step critical section against one shared editor; running two requests
+// concurrently can interleave the steps so a handler executes against the
+// wrong document. Chain every request onto the previous one (stored on
+// globalThis to survive IIFE re-evaluations). A queue slot is force-released
+// after QUEUE_SLOT_TIMEOUT_MS even if the task never settles (some EDA calls
+// hang forever, e.g. getPdfFile in the web app) so one wedged call cannot
+// block the tab permanently; the daemon times the request out on its side
+// well before that (45s default).
+// ---------------------------------------------------------------------------
+const QUEUE_KEY = '__claude_mcp_request_queue__';
+const QUEUE_SLOT_TIMEOUT_MS = 120_000;
+
+function enqueueRequest(task: () => Promise<void>): void {
+	const g = globalThis as any;
+	const tail: Promise<void> = g[QUEUE_KEY] ?? Promise.resolve();
+	g[QUEUE_KEY] = tail.then(() => {
+		let release!: () => void;
+		const slot = new Promise<void>((resolve) => {
+			release = resolve;
+		});
+		const timer = setTimeout(release, QUEUE_SLOT_TIMEOUT_MS);
+		task().then(
+			() => {
+				clearTimeout(timer);
+				release();
+			},
+			() => {
+				clearTimeout(timer);
+				release();
+			},
+		);
+		return slot;
+	});
+}
+
+async function switchToDocument(document: string): Promise<unknown> {
+	const [itemUuid, suffix] = document.split('@');
+	if (!suffix) {
+		return eda.dmt_EditorControl.openDocument(itemUuid);
+	}
+	const tree: any = await eda.dmt_EditorControl.getSplitScreenTree();
+	let doctype: number | undefined;
+	(function walk(node: any): void {
+		if (doctype !== undefined) return;
+		if (node?.tabs) {
+			for (const t of node.tabs) {
+				if (t.tabId === document) {
+					doctype = t.data?.doctype;
+					return;
+				}
+			}
+		}
+		if (node?.children) for (const c of node.children) walk(c);
+	})(tree);
+	if (doctype === 2) {
+		return eda.lib_Symbol.openInEditor(itemUuid, suffix);
+	}
+	if (doctype === 4) {
+		return eda.lib_Footprint.openInEditor(itemUuid, suffix);
+	}
+	return eda.dmt_EditorControl.openDocument(itemUuid);
+}
+
 function handleMessage(extensionUuid: string, event: MessageEvent<any>): void {
 	let id: string | undefined;
 	try {
@@ -251,6 +316,10 @@ function handleMessage(extensionUuid: string, event: MessageEvent<any>): void {
 		// Notifications from daemon (type field, no id).
 		if (request.type === 'pong') return;
 		if (request.type === 'hello') return; // just a "you're connected" signal
+		if (request.type === 'auth.challenge') {
+			answerAuthChallenge(extensionUuid, String(request.tokenPath || ''));
+			return;
+		}
 		if (request.type === 'shutdown') {
 			setConnected(false);
 			try {
@@ -278,72 +347,91 @@ function handleMessage(extensionUuid: string, event: MessageEvent<any>): void {
 		// eda.* calls, or EasyEDA stores dead string ids (see pcb-params.ts).
 		const normalizedParams = normalizePcbParams(method, handlerParams);
 
-		// Auto-switch document if specified, then validate doc type, then run handler.
-		const switchDoc: Promise<unknown> = document
-			? (async () => {
-				const [itemUuid, suffix] = document.split('@');
-				if (!suffix) {
-					return eda.dmt_EditorControl.openDocument(itemUuid);
+		// Auto-switch document if specified, then validate doc type, then run
+		// handler — the whole pipeline deferred until the queue reaches this
+		// request (H11).
+		enqueueRequest(async () => {
+			try {
+				if (document) {
+					await switchToDocument(document);
 				}
-				const tree: any = await eda.dmt_EditorControl.getSplitScreenTree();
-				let doctype: number | undefined;
-				(function walk(node: any): void {
-					if (doctype !== undefined) return;
-					if (node?.tabs) {
-						for (const t of node.tabs) {
-							if (t.tabId === document) {
-								doctype = t.data?.doctype;
-								return;
-							}
-						}
-					}
-					if (node?.children) for (const c of node.children) walk(c);
-				})(tree);
-				if (doctype === 2) {
-					return eda.lib_Symbol.openInEditor(itemUuid, suffix);
-				}
-				if (doctype === 4) {
-					return eda.lib_Footprint.openInEditor(itemUuid, suffix);
-				}
-				return eda.dmt_EditorControl.openDocument(itemUuid);
-			})()
-			: Promise.resolve();
-
-		switchDoc.then(
-			() => requireDocumentType(method).then(
-				() =>
-					handler(normalizedParams).then(
-						(result) => sendResponse(extensionUuid, id!, applyQueryParams(result, qp)),
-						(err: any) => {
-							sendResponse(extensionUuid, id!, undefined, describeError(err));
-						},
-					),
-				(err: any) => {
-					sendResponse(extensionUuid, id!, undefined, describeError(err));
-				},
-			),
-			(err: any) => {
+			} catch (err: any) {
 				sendResponse(extensionUuid, id!, undefined, `Failed to switch to document "${document}": ${describeError(err)}`);
-			},
-		);
+				return;
+			}
+			try {
+				await requireDocumentType(method);
+				const result = await handler(normalizedParams);
+				sendResponse(extensionUuid, id!, applyQueryParams(result, qp));
+			} catch (err: any) {
+				sendResponse(extensionUuid, id!, undefined, describeError(err));
+			}
+		});
 	} catch (err: any) {
-		if (id) {
-			sendResponse(extensionUuid, id, undefined, describeError(err));
+		// If JSON parsing failed, id was never assigned; try to recover it from
+		// the raw payload so the daemon's pending request fails fast instead of
+		// waiting out its timeout.
+		if (id === undefined) {
+			const raw = typeof event.data === 'string' ? event.data : String(event.data);
+			id = raw.match(/"id"\s*:\s*"([^"]+)"/)?.[1];
+		}
+		if (id !== undefined) {
+			sendResponse(extensionUuid, id, undefined, `Protocol error handling request: ${describeError(err)}`);
 		}
 	}
 }
 
 function sendResponse(extensionUuid: string, id: string, result?: any, error?: string): void {
 	const response: Record<string, any> = { id };
-	if (error) {
+	// !== undefined, not truthiness: an empty-string error must still travel as
+	// an error, not silently become { result: undefined } (a fake success).
+	if (error !== undefined) {
 		response.error = error;
 	} else {
 		response.result = result;
 	}
+	const payload = JSON.stringify(response);
 	try {
-		eda.sys_WebSocket.send(WS_ID, JSON.stringify(response), extensionUuid);
+		eda.sys_WebSocket.send(WS_ID, payload, extensionUuid);
 	} catch {
+		// Socket dropped while a handler was running. Buffer the response and
+		// flush it after reconnect; if the daemon has already failed the request
+		// on its side, an unknown id in the flush is harmless.
+		bufferResponse(id, payload);
 		handleConnectionLost(extensionUuid);
+	}
+}
+
+// H14: responses produced while the socket is down, keyed by request id.
+// Bounded so a long outage cannot grow it without limit (oldest dropped first).
+const PENDING_RESPONSE_KEY = '__claude_mcp_pending_responses__';
+const PENDING_RESPONSE_MAX = 100;
+
+function pendingResponses(): Map<string, string> {
+	const g = globalThis as any;
+	if (!g[PENDING_RESPONSE_KEY]) g[PENDING_RESPONSE_KEY] = new Map<string, string>();
+	return g[PENDING_RESPONSE_KEY];
+}
+
+function bufferResponse(id: string, payload: string): void {
+	const buf = pendingResponses();
+	if (buf.size >= PENDING_RESPONSE_MAX) {
+		const oldest = buf.keys().next().value;
+		if (oldest !== undefined) buf.delete(oldest);
+	}
+	buf.set(id, payload);
+}
+
+function flushBufferedResponses(extensionUuid: string): void {
+	const buf = pendingResponses();
+	for (const [id, payload] of [...buf]) {
+		try {
+			eda.sys_WebSocket.send(WS_ID, payload, extensionUuid);
+			buf.delete(id);
+		} catch {
+			// Socket dropped again mid-flush; keep the rest for the next reconnect.
+			break;
+		}
 	}
 }
 
@@ -353,6 +441,28 @@ function sendNotification(extensionUuid: string, type: string, data: any): void 
 	} catch {
 		handleConnectionLost(extensionUuid);
 	}
+}
+
+/**
+ * C4 auth: prove to the daemon that this extension runs as the same user by
+ * reading back the per-run token file the daemon wrote (0600, inside its 0700
+ * state dir). readFileFromFileSystem only exists in the desktop client and
+ * requires the extension's external interaction permission; when it throws we
+ * report token: null and the daemon decides (default: continue on Origin
+ * trust; EDA_WS_AUTH=require on the daemon: reject).
+ */
+async function answerAuthChallenge(extensionUuid: string, tokenPath: string): Promise<void> {
+	let token: string | null = null;
+	try {
+		const file = await eda.sys_FileSystem.readFileFromFileSystem(tokenPath);
+		if (file) {
+			token = (await file.text()).trim() || null;
+		}
+	} catch {
+		// Browser build, permission disabled, or the API is absent on this EDA
+		// version. token stays null.
+	}
+	sendNotification(extensionUuid, 'auth', { token });
 }
 
 /**
@@ -416,6 +526,8 @@ function connect(extensionUuid: string): void {
 				// Reset reconnect cadence so future drops get the eager 2s/5s retries
 				// instead of skipping straight to the 15s steady-state.
 				resetReconnectAttempts();
+				// Deliver any responses whose send failed while the socket was down.
+				flushBufferedResponses(extensionUuid);
 				// Push instance info after a short delay (let the daemon finish setup).
 				setTimeout(() => pushInstanceInfo(extensionUuid), 200);
 				// Surface a toast so the user knows we made it. Distinguish first
@@ -495,9 +607,12 @@ function resetReconnectAttempts(): void {
 // ---------------------------------------------------------------------------
 // Heartbeat: detect dead connections by pinging when the daemon goes quiet.
 // ---------------------------------------------------------------------------
-const HEARTBEAT_INTERVAL_MS = 90_000;
-const QUIET_THRESHOLD_MS = 60_000;
-const DEAD_THRESHOLD_MS = 180_000;
+// 30s tick / 30s quiet / 90s dead: worst-case dead detection is ~120s
+// (90s threshold + one interval), down from ~270s with the old 90/60/180
+// values. Pings are a few bytes, so the tighter cadence costs nothing.
+const HEARTBEAT_INTERVAL_MS = 30_000;
+const QUIET_THRESHOLD_MS = 30_000;
+const DEAD_THRESHOLD_MS = 90_000;
 const HEARTBEAT_TIMER_KEY = '__claude_mcp_heartbeat_timer__';
 
 function runHeartbeat(extensionUuid: string): void {
@@ -547,6 +662,42 @@ function stopHeartbeat(): void {
 // ---------------------------------------------------------------------------
 const LIVE_MODE_KEY = '__claude_mcp_live_mode__';
 const LIVE_UUID_KEY = '__claude_mcp_live_uuid__';
+const TAB_LISTENER_ID = 'claude-mcp-tab-listener';
+const TAB_PUSH_DEBOUNCE_KEY = '__claude_mcp_tab_push_timer__';
+
+/**
+ * Keep the daemon's list_instances fresh by pushing instance info whenever the
+ * user switches, opens, or closes an editor tab. Registration is deduped by id
+ * on the EDA side, so calling this again after an IIFE re-eval is safe.
+ */
+function registerTabListener(extensionUuid: string): void {
+	try {
+		eda.dmt_Event.addEditorTabEventListener(TAB_LISTENER_ID, 'all', () => {
+			// Debounce: OPEN and CLOSE also fire a TOGGLE event, so one user
+			// action can deliver several events back to back.
+			const g = globalThis as any;
+			if (g[TAB_PUSH_DEBOUNCE_KEY]) clearTimeout(g[TAB_PUSH_DEBOUNCE_KEY]);
+			g[TAB_PUSH_DEBOUNCE_KEY] = setTimeout(() => {
+				g[TAB_PUSH_DEBOUNCE_KEY] = null;
+				pushInstanceInfo(extensionUuid).catch(() => {});
+			}, 300);
+		});
+	} catch {
+		// dmt_Event unavailable on this EDA Pro build; the daemon still gets
+		// info from the on-connect push and its own instance.getInfo refresh.
+	}
+}
+
+function unregisterTabListener(): void {
+	const g = globalThis as any;
+	if (g[TAB_PUSH_DEBOUNCE_KEY]) {
+		clearTimeout(g[TAB_PUSH_DEBOUNCE_KEY]);
+		g[TAB_PUSH_DEBOUNCE_KEY] = null;
+	}
+	try {
+		eda.dmt_Event.removeEventListener(TAB_LISTENER_ID);
+	} catch { /* never registered */ }
+}
 
 export function startLiveMode(extensionUuid: string): void {
 	const g = globalThis as any;
@@ -555,6 +706,7 @@ export function startLiveMode(extensionUuid: string): void {
 	setBridgeLogEmitter((message) => sendNotification(extensionUuid, 'log', { message }));
 	resetReconnectAttempts();
 	startHeartbeat(extensionUuid);
+	registerTabListener(extensionUuid);
 	connect(extensionUuid);
 }
 
@@ -570,6 +722,7 @@ export function stopLiveMode(): void {
 		g[RECONNECT_CHECK_KEY] = null;
 	}
 	stopHeartbeat();
+	unregisterTabListener();
 	setBridgeLogEmitter(null);
 }
 

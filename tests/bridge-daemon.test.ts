@@ -12,7 +12,7 @@ import { test } from 'node:test';
 import * as assert from 'node:assert/strict';
 import { spawn, type ChildProcess } from 'node:child_process';
 import { createConnection, type Socket as NetSocket } from 'node:net';
-import { mkdtemp, rm, access, unlink, writeFile } from 'node:fs/promises';
+import { mkdtemp, rm, access, unlink, writeFile, readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve as resolvePath } from 'node:path';
 import { WebSocket } from 'ws';
@@ -34,7 +34,7 @@ function nextPort(): number {
 	return 30000 + Math.floor(Math.random() * 20000);
 }
 
-async function startDaemon(opts: { idleExitSec?: number } = {}): Promise<Harness> {
+async function startDaemon(opts: { idleExitSec?: number; env?: Record<string, string> } = {}): Promise<Harness> {
 	const stateDir = await mkdtemp(join(tmpdir(), 'easyeda-bridge-test-'));
 	const wsPort = nextPort();
 	const sockPath = join(stateDir, 'bridge.sock');
@@ -45,6 +45,7 @@ async function startDaemon(opts: { idleExitSec?: number } = {}): Promise<Harness
 		EDA_WS_PORT: String(wsPort),
 		EDA_BRIDGE_IDLE_EXIT_SEC: String(opts.idleExitSec ?? 60),
 		EDA_WS_ALLOW_ALL_ORIGINS: '1',
+		...(opts.env ?? {}),
 	};
 
 	const daemon = spawn(process.execPath, ['--require', 'ts-node/register', DAEMON_SRC], {
@@ -516,6 +517,122 @@ test('UDS monitor: daemon self-terminates when its socket file is replaced with 
 		await writeFile(h.sockPath, '');
 		const code = await waitForExit(h.daemon, 10000);
 		assert.equal(code, 2, `daemon should exit with code 2 when its UDS file is replaced, got ${code}`);
+	} finally {
+		await h.cleanup();
+	}
+});
+
+// ---------------------------------------------------------------------------
+// C4: WS auth token
+// ---------------------------------------------------------------------------
+
+function wsCloseCode(ws: WebSocket, timeoutMs = 5000): Promise<number> {
+	return new Promise((resolve, reject) => {
+		const timer = setTimeout(() => reject(new Error('socket did not close in time')), timeoutMs);
+		ws.once('close', (code) => { clearTimeout(timer); resolve(code); });
+	});
+}
+
+function nextMessage(ws: WebSocket, predicate: (msg: any) => boolean, timeoutMs = 5000): Promise<any> {
+	return new Promise((resolve, reject) => {
+		const onMsg = (data: any) => {
+			try {
+				const msg = JSON.parse(data.toString());
+				if (predicate(msg)) {
+					clearTimeout(timer);
+					ws.off('message', onMsg);
+					resolve(msg);
+				}
+			} catch { /* not JSON, keep waiting */ }
+		};
+		const timer = setTimeout(() => {
+			ws.off('message', onMsg);
+			reject(new Error('nextMessage timeout'));
+		}, timeoutMs);
+		ws.on('message', onMsg);
+	});
+}
+
+test('WS auth: wrong ?token= in the URL is rejected with 4003', async () => {
+	const h = await startDaemon();
+	try {
+		const ws = new WebSocket(`ws://127.0.0.1:${h.wsPort}?instanceId=aabb0011&token=wrong`, {
+			origin: 'https://easyeda.com',
+		});
+		const code = await wsCloseCode(ws);
+		assert.equal(code, 4003);
+	} finally {
+		await h.cleanup();
+	}
+});
+
+test('WS auth: correct ?token= from the state dir is accepted', async () => {
+	const h = await startDaemon();
+	try {
+		const token = (await readFile(join(h.stateDir, 'ws-token'), 'utf8')).trim();
+		const ws = new WebSocket(`ws://127.0.0.1:${h.wsPort}?instanceId=aabb0022&token=${token}`, {
+			origin: 'https://easyeda.com',
+		});
+		await nextMessage(ws, (m) => m.type === 'hello');
+		ws.close();
+	} finally {
+		await h.cleanup();
+	}
+});
+
+test('WS auth: wrong token in an auth message closes an already-registered socket', async () => {
+	const h = await startDaemon();
+	try {
+		const ws = new WebSocket(`ws://127.0.0.1:${h.wsPort}?instanceId=aabb0033`, {
+			origin: 'https://easyeda.com',
+		});
+		// Default policy: registered on Origin trust before any auth answer.
+		await nextMessage(ws, (m) => m.type === 'hello');
+		ws.send(JSON.stringify({ type: 'auth', data: { token: 'wrong' } }));
+		const code = await wsCloseCode(ws);
+		assert.equal(code, 4003);
+	} finally {
+		await h.cleanup();
+	}
+});
+
+test('WS auth: EDA_WS_AUTH=require quarantines until the challenge is answered', async () => {
+	const h = await startDaemon({ env: { EDA_WS_AUTH: 'require' } });
+	try {
+		const client = new MockMcpClient(h.sockPath);
+		await client.ready();
+
+		const ws = new WebSocket(`ws://127.0.0.1:${h.wsPort}?instanceId=aabb0044`, {
+			origin: 'https://easyeda.com',
+		});
+		// list_instances awaits an instance.getInfo round-trip per extension, so
+		// the fake extension must answer it or the tool call stalls.
+		ws.on('message', (data) => {
+			try {
+				const msg = JSON.parse(data.toString());
+				if (msg.method === 'instance.getInfo') {
+					ws.send(JSON.stringify({ id: msg.id, result: { instanceId: 'aabb0044' } }));
+				}
+			} catch { /* ignore */ }
+		});
+		const challenge = await nextMessage(ws, (m) => m.type === 'auth.challenge');
+		assert.equal(typeof challenge.tokenPath, 'string');
+
+		// Quarantined: not visible to MCP clients yet (zero-instance path
+		// returns a plain-text hint, not JSON).
+		let res = await client.callTool('list_instances', {});
+		assert.match(res.result.content[0].text, /No EasyEDA Pro instances are connected/);
+
+		const token = (await readFile(challenge.tokenPath, 'utf8')).trim();
+		ws.send(JSON.stringify({ type: 'auth', data: { token } }));
+		await nextMessage(ws, (m) => m.type === 'hello');
+
+		res = await client.callTool('list_instances', {});
+		const body = JSON.parse(res.result.content[0].text);
+		assert.equal(body.connectedInstanceCount, 1);
+
+		ws.close();
+		await client.close();
 	} finally {
 		await h.cleanup();
 	}

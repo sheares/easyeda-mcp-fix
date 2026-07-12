@@ -25,6 +25,27 @@ async function exportFile(file: File | undefined): Promise<{ fileName: string; d
 	return { fileName: file.name, data, size: file.size };
 }
 
+// getPdfFile and get3DFile are known to hang forever in the EasyEDA web app
+// (the export dialogue's renderer never resolves headlessly). Cap them so the
+// caller gets a diagnosis instead of an open-ended stall.
+const EXPORT_TIMEOUT_MS = 30_000;
+
+function withExportTimeout<T>(promise: Promise<T>, apiName: string): Promise<T> {
+	return new Promise<T>((resolve, reject) => {
+		const timer = setTimeout(() => {
+			reject(new Error(
+				`${apiName} did not resolve within ${EXPORT_TIMEOUT_MS / 1000}s. ` +
+				'This is a known EasyEDA hang in the web app; use the desktop client, ' +
+				'or export manually via File menu.',
+			));
+		}, EXPORT_TIMEOUT_MS);
+		promise.then(
+			(value) => { clearTimeout(timer); resolve(value); },
+			(err) => { clearTimeout(timer); reject(err); },
+		);
+	});
+}
+
 // Standard fab-layer types we want included by default when no explicit
 // `layers` list is supplied. Without this, EasyEDA's getGerberFile /
 // getOpenDatabaseDoublePlusFile only emit Top+Bottom copper — inner copper
@@ -99,18 +120,24 @@ export const manufactureHandlers: Record<string, (params: Record<string, any>) =
 	},
 
 	'pcb.manufacture.get3DFile': async (params) => {
-		const file = await eda.pcb_ManufactureData.get3DFile(
-			params.fileName,
-			params.fileType,
-			params.element,
-			params.modelMode,
-			params.autoGenerateModels,
+		const file = await withExportTimeout(
+			eda.pcb_ManufactureData.get3DFile(
+				params.fileName,
+				params.fileType,
+				params.element,
+				params.modelMode,
+				params.autoGenerateModels,
+			),
+			'get3DFile',
 		);
 		return exportFile(file);
 	},
 
 	'pcb.manufacture.getPdfFile': async (params) => {
-		const file = await eda.pcb_ManufactureData.getPdfFile(params.fileName);
+		const file = await withExportTimeout(
+			eda.pcb_ManufactureData.getPdfFile(params.fileName),
+			'getPdfFile',
+		);
 		return exportFile(file);
 	},
 

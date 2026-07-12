@@ -44,6 +44,12 @@ export function invalidateNetlistCache(): void {
  * in ~1s on the same project. We keep the JLCEDA netlist type so the payload
  * shape matches `parseRawNetlist`, and fall back to the deprecated call only if
  * the new API is missing on this EDA Pro build.
+ *
+ * Considered and rejected (types 0.3.5): the alpha `SCH_Net.getCurrentProjectAllNets`
+ * returns nets as wire lists (wire name/id, page uuid) with no component pins,
+ * designators, or props, so it cannot produce the per-component ParsedNetlist
+ * shape every consumer here needs. Revisit if a later SDK adds pin info to
+ * ISCH_NetInfo.
  */
 export async function fetchRawNetlist(type?: ESYS_NetlistType): Promise<string> {
 	const netlistType = type ?? ESYS_NetlistType.JLCEDA_PRO;

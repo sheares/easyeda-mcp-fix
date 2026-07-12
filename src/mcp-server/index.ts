@@ -133,6 +133,15 @@ async function main() {
 
 	process.on('SIGINT', async () => { await proxy.stop(); process.exit(0); });
 	process.on('SIGTERM', async () => { await proxy.stop(); process.exit(0); });
+
+	// The MCP client (Claude Code etc.) signals shutdown by closing our stdin,
+	// not by signalling. Without these the proxy would linger as an orphan
+	// holding a UDS connection to the daemon. server.connect() installed the
+	// SDK's own onclose handler, so chain rather than overwrite it.
+	const shutdown = async () => { await proxy.stop(); process.exit(0); };
+	const sdkOnClose = transport.onclose;
+	transport.onclose = () => { sdkOnClose?.(); void shutdown(); };
+	process.stdin.on('end', () => { void shutdown(); });
 }
 
 main().catch((err) => {

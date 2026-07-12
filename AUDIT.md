@@ -20,9 +20,10 @@ Severity: **C** = fix before relying on it, **H** = important, **N** = nice-to-h
 `src/mcp-server/proxy-client.ts:23` (45 s) vs `src/bridge-daemon/index.ts:59-69` (45 s per extension RPC, and one tool call can issue three RPCs plus git work, e.g. `document_set_source`). The proxy times out, the daemon completes the write anyway, the model retries, the write runs twice. The uncommitted `EASYEDA_REQUEST_TIMEOUT_MS` change makes this worse because only the daemon side is tunable (see H1).
 **Fix:** proxy timeout must exceed the daemon's worst-case budget, or the daemon should send per-call keepalives/deadlines.
 
-### C4. WS listener has no authentication
+### C4. WS listener has no authentication — RESOLVED (2026-07-12)
 `src/bridge-daemon/index.ts:38-54, 352-362`. Only the `Origin` header is checked, which any local process can spoof (`curl -H "Origin: ..."`). A fake "extension" can register, get auto-selected by `resolveExtension`, receive full document sources, and feed responses into tools that write attacker-controlled bytes to arbitrary paths (`document_save_to_file`, `pcb_export_to_file`, backups). The UDS socket and `~/.easyeda-mcp` also get default permissions (no chmod anywhere).
 **Fix:** per-daemon random token in the state dir, required in the WS URL; `chmod 0700` the state dir and `0600` the socket.
+**Fix applied:** state dir 0700 + socket 0600 landed earlier (efc391a). Token auth works as a challenge-response, because the extension cannot know the state-dir path up front: the daemon writes a per-run random token (0600) and challenges each connection with the token path; the extension reads it back via `eda.sys_FileSystem.readFileFromFileSystem`, proving same-user file access. A wrong answer always closes the socket (also enforced for `?token=` in the WS URL). Because `readFileFromFileSystem` is desktop-only, `@beta`, and gated on the extension's external interaction permission, the default policy still accepts connections that cannot read the token (Origin trust, pre-C4 status quo); `EDA_WS_AUTH=require` refuses them. Covered by four tests in `tests/bridge-daemon.test.ts`.
 
 ### C5. Cross-instance RPC response spoofing
 `src/bridge-daemon/index.ts:288-294`. Pending RPCs are resolved by `msg.id` only; ids are global and sequential, so any connected extension can answer another instance's request.
