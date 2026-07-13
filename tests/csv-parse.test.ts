@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import * as assert from 'node:assert/strict';
-import { parseCsv, csvToRows } from '../src/extension/handlers/csv';
+import { parseCsv, csvToRows, sniffDelimiter } from '../src/extension/handlers/csv';
 
 test('parseCsv parses simple rows', () => {
 	assert.deepEqual(parseCsv('a,b,c\n1,2,3'), [
@@ -66,4 +66,32 @@ test('csvToRows fills missing trailing cells with empty strings', () => {
 test('csvToRows returns [] for empty input and header-only input', () => {
 	assert.deepEqual(csvToRows(''), []);
 	assert.deepEqual(csvToRows('a,b,c\n'), []);
+});
+
+test('sniffDelimiter picks tab when tabs outnumber commas in header', () => {
+	assert.equal(sniffDelimiter('a\tb\tc\n1\t2\t3'), '\t');
+	assert.equal(sniffDelimiter('a,b,c\n1,2,3'), ',');
+	assert.equal(sniffDelimiter(''), ',');
+});
+
+test('sniffDelimiter looks past a leading BOM', () => {
+	assert.equal(sniffDelimiter('\uFEFFa\tb\tc'), '\t');
+});
+
+test('parseCsv with tab delimiter parses TSV rows', () => {
+	assert.deepEqual(parseCsv('a\tb\tc\n1\t2\t3', '\t'), [
+		['a', 'b', 'c'],
+		['1', '2', '3'],
+	]);
+});
+
+test('csvToRows auto-sniffs TSV (EasyEDA BOM shape)', () => {
+	const tsv =
+		'No.\tQuantity\tComment\tDesignator\tSupplier Part\n' +
+		'1\t7\t100nF\tC1\t\n' +
+		'2\t1\t470uF\tC7\tC134613';
+	assert.deepEqual(csvToRows(tsv), [
+		{ 'No.': '1', Quantity: '7', Comment: '100nF', Designator: 'C1', 'Supplier Part': '' },
+		{ 'No.': '2', Quantity: '1', Comment: '470uF', Designator: 'C7', 'Supplier Part': 'C134613' },
+	]);
 });
