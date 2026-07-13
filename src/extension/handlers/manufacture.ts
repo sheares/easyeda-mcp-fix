@@ -1,3 +1,5 @@
+import { csvToRows } from './csv';
+
 async function fileToBase64(file: File): Promise<string> {
 	return new Promise((resolve, reject) => {
 		const reader = new FileReader();
@@ -108,6 +110,25 @@ export const manufactureHandlers: Record<string, (params: Record<string, any>) =
 			params.columns,
 		);
 		return exportFile(file);
+	},
+
+	// Schematic-side BOM, returned as parsed rows rather than a base64 file so
+	// the generic filter/fields/limit projection in ws-client.ts applies.
+	'sch.manufacture.getBomFile': async (params) => {
+		const file = await withExportTimeout(
+			eda.sch_ManufactureData.getBomFile(
+				params.fileName,
+				'csv',
+				params.template,
+				params.filterOptions,
+				params.statistics,
+				params.property,
+				params.columns,
+			),
+			'sch_ManufactureData.getBomFile',
+		);
+		if (!file) throw new Error('getBomFile returned no file');
+		return csvToRows(await file.text());
 	},
 
 	'pcb.manufacture.getPickAndPlaceFile': async (params) => {

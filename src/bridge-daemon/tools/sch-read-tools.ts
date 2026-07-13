@@ -189,6 +189,22 @@ Only use this tool when you need a specific netlist export format (Allegro, PADS
 		},
 
 		{
+			name: 'sch_export_bom',
+			description: `Export the schematic-side BOM as parsed rows (one object per BOM line, keyed by column header).
+The schematic BOM is the source of truth for supplier metadata — recommended for verifying BOM integrity after batch edits (e.g. confirm Supplier Part / LCSC numbers survived a sch_modify_component run).
+Columns follow the EasyEDA BOM template, e.g. "Designator", "Quantity", "Manufacturer Part", "Supplier Part".
+Supports filter/fields/limit on the rows (e.g. filter: {"Designator": "R*"}).
+For a PCB-side BOM file (xlsx/csv, base64), use pcb_export with format:"bom" instead.`,
+			inputShape: withQueryParams({
+				template: z.string().optional().describe('BOM template name (defaults to the project default template)'),
+			}),
+			handler: async (params) => {
+				const result = await ctx.sendToExtension('sch.manufacture.getBomFile', params);
+				return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
+			},
+		},
+
+		{
 			name: 'sch_get_connectivity',
 			description: `Get compact connectivity data: which nets connect which component pins, with resolved part names.
 Much smaller than sch_get_netlist — use this for connectivity questions.

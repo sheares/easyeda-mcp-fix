@@ -145,6 +145,9 @@ Two tool families are worth calling out for high-throughput workflows:
   local files (avoids MCP payload size limits).
 - **`project_export_file` / `project_import_file`** read and write
   entire `.epro` projects as ZIP archives.
+- **`sch_export_bom`** returns the schematic-side BOM as parsed rows
+  (the source of truth for supplier metadata), handy for verifying BOM
+  integrity after batch edits.
 
 ### 2. The schematic editing library
 
