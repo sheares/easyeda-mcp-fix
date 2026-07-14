@@ -161,6 +161,37 @@ export function schWriteTools(ctx: ToolContext): ToolDef[] {
 		},
 
 		{
+			name: 'sch_swap_supplier_part',
+			description: `Bulk-swap supplier metadata on schematic components matching a filter.
+Uses the same bug-1 metadata guard as sch_modify_component: unspecified fields (otherProperty, uniqueId, position, symbol, etc.) are preserved via a snapshot-and-merge round trip, so a swap that only touches supplierId doesn't wipe the rest of the BOM row.
+Typical uses: rotate to a cheaper LCSC alt (match: {supplierId: "C25804"}, replace: {supplierId: "C17414", manufacturerId: "..."}), or bulk-tag a designator prefix (match: {designator: "R*"}, replace: {manufacturer: "YAGEO"}).
+match: filter fields with the same semantics as read-tool filter — exact string, ["a","b"] OR-array, or "prefix*" glob. Any component field is accepted (designator, supplierId, manufacturerId, manufacturer, ...).
+replace: at least one of supplierId, manufacturerId, manufacturer, supplier.
+dryRun: if true, returns the matches with before/after but does NOT modify. Recommended for the first pass.
+allSchematicPages: walk every schematic page instead of only the active one; original page is restored.
+Returns { dryRun, swappedCount, swapped:[{primitiveId, designator, page, before, after}] }. Always re-run sch_export_bom afterward to confirm BOM integrity.`,
+			inputShape: withDocumentParam({
+				match: z
+					.record(z.string(), z.union([z.string(), z.number(), z.boolean(), z.array(z.string())]))
+					.describe('Filter fields to match components on (exact, OR array, or "prefix*" glob).'),
+				replace: z
+					.object({
+						supplierId: z.string().nullable().optional().describe('New supplier part number (e.g. LCSC C-number)'),
+						manufacturerId: z.string().nullable().optional().describe('New manufacturer part number'),
+						manufacturer: z.string().nullable().optional().describe('New manufacturer name'),
+						supplier: z.string().nullable().optional().describe('New supplier name (default LCSC)'),
+					})
+					.describe('Supplier metadata to overwrite on matched components. At least one field required.'),
+				allSchematicPages: z.boolean().optional().describe('Walk all schematic pages (defaults to active page only)'),
+				dryRun: z.boolean().optional().describe('If true, return matches with before/after but do not modify. Recommended for first pass.'),
+			}),
+			handler: async (params) => {
+				const result = await ctx.sendToExtension('sch.component.swapSupplierPart', params);
+				return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
+			},
+		},
+
+		{
 			name: 'sch_create_wire',
 			description: 'Create a wire in the schematic defined by a series of coordinate points',
 			inputShape: withDocumentParam({

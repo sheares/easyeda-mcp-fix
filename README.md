@@ -148,6 +148,10 @@ Two tool families are worth calling out for high-throughput workflows:
 - **`sch_export_bom`** returns the schematic-side BOM as parsed rows
   (the source of truth for supplier metadata), handy for verifying BOM
   integrity after batch edits.
+- **`sch_swap_supplier_part`** does a filter-and-replace on supplier
+  metadata across matched components in one call, reusing the bug-1
+  metadata guard so nothing else is wiped; supports `dryRun` for a
+  preview before the real swap.
 
 ### 2. The schematic editing library
 

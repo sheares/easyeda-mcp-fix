@@ -2,6 +2,7 @@ import { fetchParsedNetlist, invalidateNetlistCache, resolveTemplateExpressions 
 import type { ParsedNetlist } from './sch-netlist-parse';
 import { preserveMetadataOnModify, BASE_METADATA_PRESERVE_FIELDS } from './preserve-metadata';
 import { forEachSchematicPage } from './sch-page-walk';
+import { matchesFilter, type MatchFilter } from './component-match';
 
 /**
  * Resolve ={...} template expressions in all string fields of a component
@@ -152,6 +153,71 @@ export const schComponentHandlers: Record<string, (params: Record<string, any>) 
 		);
 		invalidateNetlistCache();
 		return result;
+	},
+
+	// Bulk-swap supplier metadata on components matching a filter. Uses the
+	// same bug-1 guard as sch.component.modify so a swap that only touches
+	// supplierId doesn't wipe the rest of the BOM row. dryRun previews matches
+	// without writing, so callers can verify the selection before committing.
+	'sch.component.swapSupplierPart': async (params) => {
+		const match: MatchFilter = params.match ?? {};
+		const replace: Record<string, any> = {};
+		for (const key of ['supplierId', 'manufacturerId', 'manufacturer', 'supplier'] as const) {
+			if (params.replace?.[key] !== undefined) replace[key] = params.replace[key];
+		}
+		if (Object.keys(replace).length === 0) {
+			throw new Error('replace must contain at least one of: supplierId, manufacturerId, manufacturer, supplier');
+		}
+		const dryRun = params.dryRun === true;
+		const swapped: any[] = [];
+
+		const captureBefore = (c: any) => ({
+			supplierId: c?.supplierId ?? null,
+			manufacturerId: c?.manufacturerId ?? null,
+			manufacturer: c?.manufacturer ?? null,
+			supplier: c?.supplier ?? null,
+		});
+
+		const processPage = async (pageInfo: { uuid?: string; name?: string }) => {
+			const raw = await eda.sch_PrimitiveComponent.getAll(undefined, false);
+			const comps: any[] = Array.isArray(raw) ? raw : [];
+			for (const c of comps) {
+				if (!matchesFilter(c, match)) continue;
+				const before = captureBefore(c);
+				const after = { ...before, ...replace };
+				const entry: any = {
+					primitiveId: c.primitiveId,
+					designator: c.designator,
+					// Multi-schematic projects (e.g. Splitflap Board1/2/3 in one project)
+					// have per-schematic "P1"/"P2" names that collide across boards;
+					// pageUuid is the disambiguator.
+					page: pageInfo.name ?? null,
+					pageUuid: pageInfo.uuid ?? null,
+					before,
+					after,
+				};
+				if (!dryRun) {
+					await preserveMetadataOnModify(
+						schPrimitiveApi,
+						BASE_METADATA_PRESERVE_FIELDS,
+						c.primitiveId,
+						replace,
+					);
+				}
+				swapped.push(entry);
+			}
+		};
+
+		if (params.allSchematicPages) {
+			await forEachSchematicPage(processPage);
+		} else {
+			const current: any = await eda.dmt_Schematic.getCurrentSchematicPageInfo();
+			await processPage({ uuid: current?.uuid, name: current?.name });
+		}
+
+		if (!dryRun && swapped.length > 0) invalidateNetlistCache();
+
+		return { dryRun, swappedCount: swapped.length, swapped };
 	},
 
 	'sch.component.get': async (params) => {
