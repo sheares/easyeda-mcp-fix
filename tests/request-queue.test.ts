@@ -110,3 +110,23 @@ test('a task that throws does not stall the queue', async () => {
 	await later(50, 0);
 	assert.deepEqual(order, ['A', 'B']);
 });
+
+// D5: a SYNCHRONOUSLY-throwing task (not an async function) previously threw
+// out of runSlot, rejected the tail, and wedged the queue forever — every
+// later enqueue chained onto a rejected promise and never ran.
+test('a synchronously-throwing task does not poison the queue', async () => {
+	const q = makeQueue(1_000);
+	const order: string[] = [];
+	q.enqueue((() => {
+		order.push('A');
+		throw new Error('sync boom');
+	}) as any);
+	q.enqueue(async () => {
+		order.push('B');
+	});
+	q.enqueue(async () => {
+		order.push('C');
+	});
+	await later(50, 0);
+	assert.deepEqual(order, ['A', 'B', 'C']);
+});

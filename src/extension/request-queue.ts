@@ -30,7 +30,13 @@ export function createRequestQueue(opts: RequestQueueOptions): RequestQueue {
 	return {
 		enqueue(task) {
 			const tail = opts.getTail();
-			const next = tail.then(() => runSlot(task, opts));
+			// D5: chain on BOTH settle paths. runSlot never rejects, but if the
+			// tail were ever a rejected promise (a bug elsewhere), a plain
+			// .then(fn) would skip fn and propagate the rejection to every
+			// later slot — the queue would be wedged for the tab's lifetime
+			// with no log line.
+			const run = () => runSlot(task, opts);
+			const next = tail.then(run, run);
 			opts.setTail(next);
 		},
 	};
@@ -58,15 +64,22 @@ function runSlot(
 		} catch { /* logging must never throw */ }
 		release();
 	}, opts.slotTimeoutMs);
-	task(() => forceReleased).then(
-		() => {
-			clearTimeout(timer);
-			release();
-		},
-		() => {
-			clearTimeout(timer);
-			release();
-		},
-	);
+	// D5: start the task inside a promise chain so a SYNCHRONOUSLY-throwing
+	// task settles its slot like any rejection, instead of throwing out of
+	// runSlot and poisoning the tail. Current callers pass async functions
+	// (which cannot throw synchronously), but the queue must not depend on
+	// that.
+	Promise.resolve()
+		.then(() => task(() => forceReleased))
+		.then(
+			() => {
+				clearTimeout(timer);
+				release();
+			},
+			() => {
+				clearTimeout(timer);
+				release();
+			},
+		);
 	return slot;
 }

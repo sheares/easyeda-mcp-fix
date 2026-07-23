@@ -2,8 +2,25 @@ import { spawn } from 'node:child_process';
 import { createConnection } from 'node:net';
 import { mkdir } from 'node:fs/promises';
 import { resolve as resolvePath } from 'node:path';
-import { openSync, closeSync } from 'node:fs';
+import { openSync, closeSync, statSync, renameSync } from 'node:fs';
 import { socketPath, logPath, stateDir } from './protocol';
+
+// D6: bridge.log is opened in append mode on every daemon spawn and nothing
+// ever trimmed it — every WS handshake, extension diagnostic line and
+// lifecycle event accumulated forever. Rotate to a single .1 sibling above
+// this size, bounding the pair at roughly twice this value.
+const LOG_ROTATE_BYTES = 5 * 1024 * 1024;
+
+/** Best-effort rotation; a failure must never stop the daemon spawn. */
+function rotateLogIfLarge(path: string): void {
+	try {
+		if (statSync(path).size > LOG_ROTATE_BYTES) {
+			renameSync(path, `${path}.1`); // overwrites any previous .1
+		}
+	} catch {
+		// Missing file (first run) or a permissions oddity — either way, spawn on.
+	}
+}
 
 /**
  * Probe-connect the UDS to see if a daemon is already running.
@@ -63,6 +80,7 @@ export async function ensureDaemonRunning(): Promise<void> {
 	await mkdir(stateDir(), { recursive: true });
 
 	const entry = daemonEntryPath();
+	rotateLogIfLarge(logPath());
 	const logFd = openSync(logPath(), 'a');
 
 	const child = spawn(process.execPath, [entry], {
