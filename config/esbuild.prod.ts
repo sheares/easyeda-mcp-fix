@@ -1,4 +1,9 @@
 import esbuild from 'esbuild';
+import * as pkg from '../package.json';
+
+// Q6: the MCP server advertises its version to clients; inject the real one
+// at build time so /mcp listings and logs stop reporting a hardcoded 1.0.0.
+const versionDefine = { __EASYEDA_MCP_VERSION__: JSON.stringify(pkg.version) };
 
 // Extension build: IIFE for EDA Pro browser environment
 const extensionConfig: esbuild.BuildOptions = {
@@ -25,6 +30,7 @@ const mcpServerConfig: esbuild.BuildOptions = {
 	format: 'cjs',
 	treeShaking: true,
 	external: [],
+	define: versionDefine,
 };
 
 // Bridge daemon: CJS for Node.js. Shipped as a sibling of dist/mcp-server so

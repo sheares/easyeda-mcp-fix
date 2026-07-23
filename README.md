@@ -59,16 +59,49 @@ Deliberate limits, kept honest:
 (MCP server, bridge daemon, EDA Pro extension) with severity ratings.
 Seven criticals were identified; all seven are resolved on this branch.
 
-C4 (WebSocket authentication) works as a challenge-response: the daemon
-writes a per-run random token (mode 0600, inside its 0700 state dir) and
-challenges every extension connection to read it back, proving the peer
-runs as the same user. A wrong answer always closes the socket. By default
-a connection that *cannot* read the token (the browser web app, or a
-desktop install without the extension's external interaction permission)
-is still accepted on Origin trust, matching pre-C4 behaviour. Set
-`EDA_WS_AUTH=require` in the daemon's environment to refuse
-unauthenticated connections entirely (hardened mode; desktop client only,
-and the extension's external interaction permission must be enabled).
+C4 (WebSocket authentication) is a mutual HMAC challenge-response
+(hmac-v1, since v1.6.0): the daemon writes a per-run random token (mode
+0600, inside its 0700 state dir) and challenges every connection with a
+fresh nonce; the extension reads the token itself (path shape validated)
+and answers with an HMAC over the nonces, and the daemon proves its own
+token knowledge back with a domain-separated HMAC the extension verifies.
+The raw token never crosses the wire, and a rogue process that binds the
+port cannot impersonate either side. A wrong answer always closes the
+socket. By default a connection that *cannot* read the token (the browser
+web app, or a desktop install without the extension's external
+interaction permission) is still accepted on Origin trust, matching
+pre-C4 behaviour — the extension then shows a one-time "unverified
+daemon" warning. Set `EDA_WS_AUTH=require` in the daemon's environment to
+refuse unauthenticated connections entirely (hardened mode; desktop
+client only, and the extension's external interaction permission must be
+enabled). Upgrade note: a v1.6.0 `.eext` never sends the raw token, so
+against a pre-1.6.0 daemon it runs on Origin trust; `EDA_WS_AUTH=require`
+needs both sides at 1.6.0+.
+
+Two QA passes on 2026-07-24
+([`QA-REPORT-2026-07-24.md`](QA-REPORT-2026-07-24.md),
+[`QA-DEEP-REPORT-2026-07-24.md`](QA-DEEP-REPORT-2026-07-24.md)) drove a
+further hardening round: document-switch verification before every routed
+operation, pre-write backups on bulk supplier swaps, MCP risk annotations
+on all ~100 tools, the mutual auth above, and assorted transport and
+correctness fixes. See [`HANDOVER-2026-07-24.md`](HANDOVER-2026-07-24.md)
+for the work-order trail.
+
+### Environment variables
+
+All knobs are daemon/server side; the extension has no environment access.
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `EDA_BRIDGE_STATE_DIR` | `~/.easyeda-mcp` | State dir (UDS socket, pid file, ws-token, bridge.log) |
+| `EDA_WS_PORT` | `16168` | Daemon WS port. The extension always dials 16168 (it cannot see env vars), so changing this strands it — test use only |
+| `EDA_WS_AUTH` | unset | `require` refuses WS connections that do not prove token knowledge |
+| `EDA_WS_ALLOW_ALL_ORIGINS` | unset | `1` disables the WS Origin allowlist. Debugging escape hatch only; the daemon logs a loud warning at startup and `server_info` reports it |
+| `EDA_BRIDGE_IDLE_EXIT_SEC` | `5` | Daemon exits this many seconds after the last MCP client disconnects (`0` = immediate) |
+| `EDA_BRIDGE_DAEMON_ENTRY` | `dist/bridge-daemon/index.js` | Daemon entry override (tests point it at the .ts source) |
+| `EDA_REQUEST_TIMEOUT_MS` | `45000` | Per-RPC extension timeout; the MCP proxy's call timeout derives from it (3x + 30 s). `EASYEDA_REQUEST_TIMEOUT_MS` is an accepted alias |
+| `EDA_BACKUP_DIR` | `~/.easyeda-mcp-backup` | Git-tracked backup repo for destructive operations |
+| `EDA_DISCOVERY_LOG` | `~/.easyeda-schema-discovery.jsonl` | Where unknown schema tags are logged for schema growth |
 
 ## Install
 
@@ -76,7 +109,7 @@ and the extension's external interaction permission must be enabled).
 git clone https://github.com/sheares/easyeda-mcp-fix.git
 cd easyeda-mcp-fix
 npm install
-npm test              # 84 tests
+npm test              # 176 tests
 npm run build         # produces build/dist/easyeda-agent-mcp-server_vN.N.N.eext
 ```
 
@@ -117,7 +150,7 @@ src/
   lib/           schematic editing library (start at src/lib/README.md)
 docs/            .esch / .epcb / .epro file format reference
 examples/        working examples using the editing library
-tests/           84 tests (node --test, ts-node)
+tests/           176 tests (node --test, ts-node)
 ```
 
 ## Two distinct pieces
@@ -132,7 +165,7 @@ A pair of programs connected over WebSocket:
   It connects to the MCP server's WebSocket and dispatches API calls to
   EasyEDA Pro's internal `eda.*` namespace.
 
-The server exposes ~98 tools covering schematic primitives, PCB
+The server exposes ~100 tools covering schematic primitives, PCB
 primitives, libraries, manufacture exports, DRC and document I/O.
 Multiple EasyEDA Pro instances can share one daemon; every tool takes an
 optional `instance_id` and `document` param for cross-tab routing.

@@ -16,6 +16,13 @@ import { resolve as resolvePath } from 'node:path';
 import { ProxyClient } from './proxy-client';
 import type { ToolDescriptor } from '../bridge-daemon/protocol';
 
+// Q6: injected by esbuild at build time (config/esbuild.prod.ts) from
+// package.json, so the version clients see in /mcp listings matches the
+// release instead of a hardcoded constant. Absent under ts-node (tests).
+declare const __EASYEDA_MCP_VERSION__: string | undefined;
+const SERVER_VERSION =
+	typeof __EASYEDA_MCP_VERSION__ !== 'undefined' && __EASYEDA_MCP_VERSION__ ? __EASYEDA_MCP_VERSION__ : '0.0.0-dev';
+
 function buildInstructions(repoRoot: string): string {
 	return [
 		'This server provides direct access to schematic and PCB designs in EasyEDA Pro.',
@@ -58,7 +65,7 @@ async function main() {
 	const server = new McpServer(
 		{
 			name: 'easyeda-agent-mcp-server',
-			version: '1.0.0',
+			version: SERVER_VERSION,
 		},
 		{
 			capabilities: { tools: { listChanged: true } },

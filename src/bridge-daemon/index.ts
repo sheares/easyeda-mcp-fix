@@ -825,6 +825,12 @@ async function main(): Promise<void> {
 	await writeFile(wsTokenPath(), wsAuthToken, { mode: 0o600 });
 	await startWebSocketServer();
 	await writeFile(pidPath(), String(process.pid));
+	// Q5: this switch disables the last Origin-based control on the WS
+	// listener; under the default auth policy that leaves it fully
+	// unauthenticated. Make it impossible to have set and forgotten.
+	if (process.env.EDA_WS_ALLOW_ALL_ORIGINS === '1') {
+		log('WARNING: EDA_WS_ALLOW_ALL_ORIGINS=1 — the WS Origin allowlist is DISABLED and any local page or process may connect (subject to the auth policy). This is a debugging escape hatch; unset it for normal use.');
+	}
 	log(`Daemon started (pid ${process.pid}, idle-exit ${idleExitSeconds()}s, tools=${registry.listDescriptors().length})`);
 	scheduleIdleExitCheck();
 }
