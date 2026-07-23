@@ -16,8 +16,9 @@ import { layerHandlers } from './handlers/layer';
 import { pcbPrimitiveHandlers } from './handlers/pcb-primitive';
 import { editorHandlers } from './handlers/editor';
 import { fileManagerHandlers } from './handlers/file-manager';
-import { describeError, setBridgeLogEmitter } from './diag';
+import { bridgeLog, describeError, setBridgeLogEmitter } from './diag';
 import { normalizePcbParams } from './handlers/pcb-params';
+import { validateAuthTokenPath } from './auth-path-validator';
 
 // Single bridge daemon owns the WebSocket port. No more scanning.
 // 16168 is one above the legacy 15168-15207 scan range — chosen so the
@@ -450,8 +451,20 @@ function sendNotification(extensionUuid: string, type: string, data: any): void 
  * requires the extension's external interaction permission; when it throws we
  * report token: null and the daemon decides (default: continue on Origin
  * trust; EDA_WS_AUTH=require on the daemon: reject).
+ *
+ * Security: validateAuthTokenPath refuses any path that isn't shaped like
+ * `.../.easyeda-mcp/ws-token` BEFORE we touch the filesystem. Without this,
+ * a rogue local process that binds port 16168 during a reconnect gap could
+ * send tokenPath: "/etc/passwd" (or any user-readable file) and receive the
+ * contents in the auth response, an arbitrary-file-read primitive.
  */
 async function answerAuthChallenge(extensionUuid: string, tokenPath: string): Promise<void> {
+	const check = validateAuthTokenPath(tokenPath);
+	if (!check.ok) {
+		bridgeLog(`auth.challenge refused: ${check.reason} (path=${JSON.stringify(tokenPath)})`);
+		sendNotification(extensionUuid, 'auth', { token: null });
+		return;
+	}
 	let token: string | null = null;
 	try {
 		const file = await eda.sys_FileSystem.readFileFromFileSystem(tokenPath);
