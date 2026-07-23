@@ -36,6 +36,7 @@ import {
 } from './protocol';
 import type { InstanceInfo, ToolContext } from './types';
 import { ToolRegistry } from './registry';
+import { createRequestIdGenerator } from './request-id';
 
 const ALLOWED_ORIGIN_PATTERNS = [
 	/^https?:\/\/([a-z0-9-]+\.)*easyeda\.com(:\d+)?$/,
@@ -131,10 +132,10 @@ const extensions = new Map<string, Extension>(); // instanceId → Extension
 const clients = new Map<string, McpClient>(); // clientId → McpClient
 const pendingExtRequests = new Map<string, PendingExtensionRequest>(); // internalId → pending
 
-let extRequestIdCounter = 0;
-function nextExtRequestId(): string {
-	return `d${++extRequestIdCounter}`;
-}
+// Per-run request id generator; see request-id.ts for the disjoint-prefix
+// rationale. 24 bits of entropy = negligible collision risk across a
+// machine's daemon runs, and stays readable in log lines.
+const nextExtRequestId = createRequestIdGenerator(randomBytes(3).toString('hex'));
 
 let idleExitTimer: ReturnType<typeof setTimeout> | null = null;
 
