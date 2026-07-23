@@ -11,11 +11,13 @@
 import { test } from 'node:test';
 import * as assert from 'node:assert/strict';
 import { spawn, type ChildProcess } from 'node:child_process';
+import { createHmac } from 'node:crypto';
 import { createConnection, type Socket as NetSocket } from 'node:net';
 import { mkdtemp, rm, access, unlink, writeFile, readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve as resolvePath } from 'node:path';
 import { WebSocket } from 'ws';
+import { daemonMacMessage, extMacMessage } from '../src/bridge-daemon/auth-mac';
 
 const DAEMON_SRC = resolvePath(__dirname, '..', 'src', 'bridge-daemon', 'index.ts');
 
@@ -591,6 +593,95 @@ test('WS auth: wrong token in an auth message closes an already-registered socke
 		ws.send(JSON.stringify({ type: 'auth', data: { token: 'wrong' } }));
 		const code = await wsCloseCode(ws);
 		assert.equal(code, 4003);
+	} finally {
+		await h.cleanup();
+	}
+});
+
+test('WS auth: hmac-v1 mutual handshake verifies both directions (EDA_WS_AUTH=require)', async () => {
+	const h = await startDaemon({ env: { EDA_WS_AUTH: 'require' } });
+	try {
+		const client = new MockMcpClient(h.sockPath);
+		await client.ready();
+
+		const ws = new WebSocket(`ws://127.0.0.1:${h.wsPort}?instanceId=ccdd0055`, {
+			origin: 'https://easyeda.com',
+		});
+		ws.on('message', (data) => {
+			try {
+				const msg = JSON.parse(data.toString());
+				if (msg.method === 'instance.getInfo') {
+					ws.send(JSON.stringify({ id: msg.id, result: { instanceId: 'ccdd0055' } }));
+				}
+			} catch { /* ignore */ }
+		});
+
+		const challenge = await nextMessage(ws, (m) => m.type === 'auth.challenge');
+		assert.equal(challenge.scheme, 'hmac-v1', 'challenge should advertise hmac-v1');
+		assert.match(challenge.serverNonce, /^[0-9a-f]{32}$/);
+
+		const token = (await readFile(challenge.tokenPath, 'utf8')).trim();
+		const clientNonce = 'cc'.repeat(16);
+		const mac = createHmac('sha256', token)
+			.update(extMacMessage(challenge.serverNonce, clientNonce))
+			.digest('hex');
+		ws.send(JSON.stringify({ type: 'auth', data: { scheme: 'hmac-v1', clientNonce, mac } }));
+
+		// Registration (hello) proves the daemon accepted the ext MAC.
+		await nextMessage(ws, (m) => m.type === 'hello');
+		// auth.ok proves the daemon's half; verify it against the same token.
+		const ok = await nextMessage(ws, (m) => m.type === 'auth.ok');
+		const expectedDaemonMac = createHmac('sha256', token)
+			.update(daemonMacMessage(clientNonce, challenge.serverNonce))
+			.digest('hex');
+		assert.equal(ok.mac, expectedDaemonMac, 'daemon MAC must verify against the token file');
+
+		const res = await client.callTool('list_instances', {});
+		const body = JSON.parse(res.result.content[0].text);
+		assert.equal(body.connectedInstanceCount, 1);
+
+		ws.close();
+		await client.close();
+	} finally {
+		await h.cleanup();
+	}
+});
+
+test('WS auth: invalid hmac answer closes the socket with 4003', async () => {
+	const h = await startDaemon();
+	try {
+		const ws = new WebSocket(`ws://127.0.0.1:${h.wsPort}?instanceId=ccdd0066`, {
+			origin: 'https://easyeda.com',
+		});
+		// Default policy registers on Origin trust before any answer.
+		await nextMessage(ws, (m) => m.type === 'hello');
+		ws.send(JSON.stringify({
+			type: 'auth',
+			data: { scheme: 'hmac-v1', clientNonce: 'dd'.repeat(16), mac: 'f'.repeat(64) },
+		}));
+		const code = await wsCloseCode(ws);
+		assert.equal(code, 4003);
+	} finally {
+		await h.cleanup();
+	}
+});
+
+test('WS auth: a daemon-direction MAC reflected as the ext answer is rejected', async () => {
+	const h = await startDaemon();
+	try {
+		const ws = new WebSocket(`ws://127.0.0.1:${h.wsPort}?instanceId=ccdd0077`, {
+			origin: 'https://easyeda.com',
+		});
+		const challenge = await nextMessage(ws, (m) => m.type === 'auth.challenge');
+		const token = (await readFile(challenge.tokenPath, 'utf8')).trim();
+		const clientNonce = 'ee'.repeat(16);
+		// Correct key, WRONG domain: daemon-format message instead of ext-format.
+		const reflected = createHmac('sha256', token)
+			.update(daemonMacMessage(clientNonce, challenge.serverNonce))
+			.digest('hex');
+		ws.send(JSON.stringify({ type: 'auth', data: { scheme: 'hmac-v1', clientNonce, mac: reflected } }));
+		const code = await wsCloseCode(ws);
+		assert.equal(code, 4003, 'domain separation must reject a reflected MAC');
 	} finally {
 		await h.cleanup();
 	}

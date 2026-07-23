@@ -20,6 +20,7 @@ import { bridgeLog, describeError, setBridgeLogEmitter } from './diag';
 import { normalizePcbParams } from './handlers/pcb-params';
 import { validateAuthTokenPath } from './auth-path-validator';
 import { checkActiveDocument } from './active-document-check';
+import { buildExtensionAuthAnswer, daemonMacMessage, hmacSha256Hex } from '../bridge-daemon/auth-mac';
 import { createRequestQueue } from './request-queue';
 
 // Single bridge daemon owns the WebSocket port. No more scanning.
@@ -314,7 +315,11 @@ function handleMessage(extensionUuid: string, event: MessageEvent<any>): void {
 		if (request.type === 'pong') return;
 		if (request.type === 'hello') return; // just a "you're connected" signal
 		if (request.type === 'auth.challenge') {
-			answerAuthChallenge(extensionUuid, String(request.tokenPath || ''));
+			answerAuthChallenge(extensionUuid, String(request.tokenPath || ''), request.scheme, request.serverNonce);
+			return;
+		}
+		if (request.type === 'auth.ok') {
+			handleAuthOk(request.mac);
 			return;
 		}
 		if (request.type === 'shutdown') {
@@ -497,21 +502,64 @@ function sendNotification(extensionUuid: string, type: string, data: any): void 
 	}
 }
 
+// D1 mutual auth state: nonces and token from the last hmac-v1 challenge we
+// answered, so auth.ok can be verified; plus a per-connection "daemon
+// verified" flag and a one-time toast guard. All on globalThis to survive
+// IIFE re-evaluations; reset on every (re)connect.
+const AUTH_STATE_KEY = '__claude_mcp_auth_state__';
+const DAEMON_VERIFIED_KEY = '__claude_mcp_daemon_verified__';
+const UNVERIFIED_TOAST_KEY = '__claude_mcp_unverified_toast_shown__';
+
+function resetDaemonAuthState(): void {
+	const g = globalThis as any;
+	g[AUTH_STATE_KEY] = null;
+	g[DAEMON_VERIFIED_KEY] = false;
+	g[UNVERIFIED_TOAST_KEY] = false;
+}
+
+export function isDaemonVerified(): boolean {
+	return (globalThis as any)[DAEMON_VERIFIED_KEY] === true;
+}
+
+function warnUnverifiedDaemonOnce(reason: string): void {
+	const g = globalThis as any;
+	bridgeLog(`daemon NOT verified: ${reason}`);
+	if (g[UNVERIFIED_TOAST_KEY]) return;
+	g[UNVERIFIED_TOAST_KEY] = true;
+	try {
+		eda.sys_Message.showToastMessage(
+			`Connected to an UNVERIFIED Claude bridge daemon (${reason}). If you did not expect this, disconnect and check what is listening on the bridge port.`,
+			ESYS_ToastMessageType.WARNING,
+			8,
+		);
+	} catch { /* toast is best-effort */ }
+}
+
 /**
- * C4 auth: prove to the daemon that this extension runs as the same user by
- * reading back the per-run token file the daemon wrote (0600, inside its 0700
- * state dir). readFileFromFileSystem only exists in the desktop client and
- * requires the extension's external interaction permission; when it throws we
- * report token: null and the daemon decides (default: continue on Origin
+ * C4/D1 auth: prove to the daemon that this extension runs as the same user
+ * by demonstrating knowledge of the per-run token file the daemon wrote
+ * (0600, inside its 0700 state dir) — and require the daemon to prove the
+ * same back (auth.ok). The raw token NEVER crosses the wire: hmac-v1
+ * challenges get an HMAC over the challenge nonces, and a challenge without
+ * the hmac-v1 scheme (legacy daemon, or a rogue listener fishing with the
+ * well-known token path) gets a null answer plus an "unverified daemon"
+ * warning. readFileFromFileSystem only exists in the desktop client and
+ * requires the extension's external interaction permission; when it throws
+ * we report token: null and the daemon decides (default: continue on Origin
  * trust; EDA_WS_AUTH=require on the daemon: reject).
  *
  * Security: validateAuthTokenPath refuses any path that isn't shaped like
  * `.../.easyeda-mcp/ws-token` BEFORE we touch the filesystem. Without this,
  * a rogue local process that binds port 16168 during a reconnect gap could
- * send tokenPath: "/etc/passwd" (or any user-readable file) and receive the
- * contents in the auth response, an arbitrary-file-read primitive.
+ * send tokenPath: "/etc/passwd" (or any user-readable file) and, pre-D1,
+ * receive the contents in the auth response.
  */
-async function answerAuthChallenge(extensionUuid: string, tokenPath: string): Promise<void> {
+async function answerAuthChallenge(
+	extensionUuid: string,
+	tokenPath: string,
+	scheme?: unknown,
+	serverNonce?: unknown,
+): Promise<void> {
 	const check = validateAuthTokenPath(tokenPath);
 	if (!check.ok) {
 		bridgeLog(`auth.challenge refused: ${check.reason} (path=${JSON.stringify(tokenPath)})`);
@@ -528,7 +576,40 @@ async function answerAuthChallenge(extensionUuid: string, tokenPath: string): Pr
 		// Browser build, permission disabled, or the API is absent on this EDA
 		// version. token stays null.
 	}
-	sendNotification(extensionUuid, 'auth', { token });
+	const answer = await buildExtensionAuthAnswer({ scheme, serverNonce }, token);
+	if (answer.kind === 'hmac') {
+		(globalThis as any)[AUTH_STATE_KEY] = {
+			token,
+			serverNonce: serverNonce as string,
+			clientNonce: answer.clientNonce,
+		};
+	} else if (token !== null) {
+		// We could read the token but the peer does not speak hmac-v1, so it
+		// cannot be verified (and we refuse to hand it the raw token).
+		warnUnverifiedDaemonOnce('bridge daemon does not support mutual auth; update the MCP server/daemon');
+	}
+	sendNotification(extensionUuid, 'auth', answer.data);
+}
+
+/**
+ * D1: verify the daemon's half of the mutual challenge. A valid MAC proves
+ * the peer can read the same ws-token file we did, i.e. it runs as this
+ * user — a rogue listener on the port cannot produce it.
+ */
+function handleAuthOk(mac: unknown): void {
+	const g = globalThis as any;
+	const state = g[AUTH_STATE_KEY] as { token: string; serverNonce: string; clientNonce: string } | null;
+	if (!state || typeof mac !== 'string') return;
+	hmacSha256Hex(state.token, daemonMacMessage(state.clientNonce, state.serverNonce))
+		.then((expected) => {
+			if (mac === expected) {
+				g[DAEMON_VERIFIED_KEY] = true;
+				bridgeLog('daemon verified via hmac-v1 mutual auth');
+			} else {
+				warnUnverifiedDaemonOnce('daemon failed the mutual auth check');
+			}
+		})
+		.catch(() => { /* webcrypto unavailable; stay unverified */ });
 }
 
 /**
@@ -589,6 +670,9 @@ function connect(extensionUuid: string): void {
 				setConnected(true);
 				setLastReceived(Date.now());
 				(globalThis as any)[CONNECTED_EVER_KEY] = true;
+				// Fresh connection, fresh daemon-verification state (D1): the
+				// challenge for this socket has not been answered yet.
+				resetDaemonAuthState();
 				// Reset reconnect cadence so future drops get the eager 2s/5s retries
 				// instead of skipping straight to the 15s steady-state.
 				resetReconnectAttempts();

@@ -22,7 +22,7 @@ import { createServer as createNetServer, type Socket as NetSocket } from 'node:
 import { mkdir, unlink, writeFile, chmod } from 'node:fs/promises';
 import { statSync } from 'node:fs';
 import { createConnection } from 'node:net';
-import { randomBytes, createHash, timingSafeEqual } from 'node:crypto';
+import { randomBytes, createHash, createHmac, timingSafeEqual } from 'node:crypto';
 import {
 	socketPath,
 	pidPath,
@@ -37,6 +37,7 @@ import {
 import type { InstanceInfo, ToolContext } from './types';
 import { ToolRegistry } from './registry';
 import { createRequestIdGenerator } from './request-id';
+import { AUTH_SCHEME_HMAC_V1, extMacMessage, daemonMacMessage } from './auth-mac';
 
 const ALLOWED_ORIGIN_PATTERNS = [
 	/^https?:\/\/([a-z0-9-]+\.)*easyeda\.com(:\d+)?$/,
@@ -84,19 +85,44 @@ function tokenMatches(candidate: string): boolean {
 }
 
 /**
- * Returns the token string from an extension auth message, null if the
- * message is an auth message reporting "could not read the token file", or
- * undefined if the message is not an auth message at all.
+ * Parsed extension auth answer. Three shapes:
+ *   - hmac (D1, hmac-v1): the extension proves token knowledge with an HMAC
+ *     over the challenge nonces; the raw token never crosses the wire.
+ *   - legacy token string: an older .eext answering with the raw token.
+ *     Kept so a new daemon still authenticates a not-yet-reinstalled
+ *     extension.
+ *   - legacy null: "could not read the token file" (browser build, or the
+ *     external interaction permission is off).
+ * undefined = not an auth message at all.
  */
-function tryParseAuthToken(raw: string): string | null | undefined {
+type ParsedAuthAnswer =
+	| { kind: 'hmac'; clientNonce: string; mac: string }
+	| { kind: 'legacy'; token: string | null }
+	| undefined;
+
+function tryParseAuthAnswer(raw: string): ParsedAuthAnswer {
 	try {
 		const msg = JSON.parse(raw);
 		if (msg?.type !== 'auth') return undefined;
-		const t = msg?.data?.token;
-		return typeof t === 'string' ? t : null;
+		const d = msg?.data ?? {};
+		if (d.scheme === AUTH_SCHEME_HMAC_V1 && typeof d.clientNonce === 'string' && typeof d.mac === 'string') {
+			return { kind: 'hmac', clientNonce: d.clientNonce, mac: d.mac };
+		}
+		return { kind: 'legacy', token: typeof d.token === 'string' ? d.token : null };
 	} catch {
 		return undefined;
 	}
+}
+
+function hmacHex(token: string, message: string): string {
+	return createHmac('sha256', token).update(message).digest('hex');
+}
+
+/** Constant-time hex MAC comparison (hash both sides to fixed length first). */
+function macMatches(expectedHex: string, candidateHex: string): boolean {
+	const a = createHash('sha256').update(candidateHex).digest();
+	const b = createHash('sha256').update(expectedHex).digest();
+	return timingSafeEqual(a, b);
 }
 
 // Timeout for a single extension RPC round-trip. Multi-page netlist queries
@@ -461,6 +487,10 @@ function startWebSocketServer(): Promise<void> {
 			}
 			let authed = urlToken !== null;
 			let registered = false;
+			// Per-connection nonce for the hmac-v1 mutual challenge (D1). Fresh
+			// per socket so a captured MAC cannot be replayed on a later
+			// connection.
+			const serverNonce = randomBytes(16).toString('hex');
 
 			const registerExtension = (): void => {
 				const existing = extensions.get(instanceId);
@@ -479,11 +509,34 @@ function startWebSocketServer(): Promise<void> {
 			ws.on('message', (data) => {
 				const raw = data.toString();
 				if (!authed) {
-					const token = tryParseAuthToken(raw);
-					if (token !== undefined) {
+					const answer = tryParseAuthAnswer(raw);
+					if (answer !== undefined) {
+						if (answer.kind === 'hmac') {
+							// D1 mutual auth: verify the extension's MAC over our
+							// nonce, then prove OUR token knowledge back so the
+							// extension can tell a real daemon from a rogue
+							// listener on this port.
+							const expected = wsAuthToken !== null
+								? hmacHex(wsAuthToken, extMacMessage(serverNonce, answer.clientNonce))
+								: null;
+							if (expected !== null && macMatches(expected, answer.mac)) {
+								authed = true;
+								log(`Extension verified via hmac-v1 (instance: ${instanceId})`);
+								if (!registered) registerExtension();
+								ws.send(JSON.stringify({
+									type: 'auth.ok',
+									mac: hmacHex(wsAuthToken!, daemonMacMessage(answer.clientNonce, serverNonce)),
+								}));
+							} else {
+								log(`Extension hmac answer INVALID (instance: ${instanceId}), closing`);
+								ws.close(4003, 'invalid auth mac');
+							}
+							return;
+						}
+						const token = answer.token;
 						if (token !== null && tokenMatches(token)) {
 							authed = true;
-							log(`Extension token verified (instance: ${instanceId})`);
+							log(`Extension token verified (legacy raw-token answer; instance: ${instanceId})`);
 							if (!registered) registerExtension();
 						} else if (token !== null) {
 							log(`Extension answered the token challenge INCORRECTLY (instance: ${instanceId}), closing`);
@@ -526,8 +579,10 @@ function startWebSocketServer(): Promise<void> {
 
 			// Challenge every connection; the answer only decides anything under
 			// EDA_WS_AUTH=require, but a correct answer is always logged and a
-			// wrong one always closes (see the C4 note above).
-			ws.send(JSON.stringify({ type: 'auth.challenge', tokenPath: wsTokenPath() }));
+			// wrong one always closes (see the C4 note above). scheme+serverNonce
+			// upgrade the exchange to hmac-v1 mutual auth (D1); an old .eext
+			// ignores them and answers with the raw token (legacy path above).
+			ws.send(JSON.stringify({ type: 'auth.challenge', tokenPath: wsTokenPath(), scheme: AUTH_SCHEME_HMAC_V1, serverNonce }));
 
 			if (WS_AUTH_REQUIRED && !authed) {
 				// Quarantine: not registered, no request routing, until the token
