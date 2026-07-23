@@ -1,11 +1,13 @@
 import { z } from 'zod';
 import type { ToolDef, ToolContext } from '../types';
 import { withInstanceParam } from './query-params';
+import * as ANN from './annotations';
 
 export function libTools(ctx: ToolContext): ToolDef[] {
 	return [
 		{
 			name: 'lib_search_device',
+			annotations: ANN.READ_ONLY_OPEN_WORLD,
 			description: 'Search the component library for devices by keyword. Returns a list of matching components with their UUIDs, names, descriptions, and package info.',
 			inputShape: withInstanceParam({
 				key: z.string().describe('Search keyword (e.g. "2.2k resistor", "STM32F103", "0805 capacitor")'),
@@ -21,6 +23,7 @@ export function libTools(ctx: ToolContext): ToolDef[] {
 
 		{
 			name: 'lib_get_device',
+			annotations: ANN.READ_ONLY,
 			description: 'Get detailed information about a specific device by its UUID, including symbol, footprint, and all properties',
 			inputShape: withInstanceParam({
 				deviceUuid: z.string().describe('The device UUID'),
@@ -34,6 +37,7 @@ export function libTools(ctx: ToolContext): ToolDef[] {
 
 		{
 			name: 'lib_get_device_by_lcsc',
+			annotations: ANN.READ_ONLY_OPEN_WORLD,
 			description: 'Get device(s) by LCSC C-number(s). Useful for finding specific components like "C17414" for a 2.2k resistor.',
 			inputShape: withInstanceParam({
 				lcscIds: z
@@ -49,6 +53,7 @@ export function libTools(ctx: ToolContext): ToolDef[] {
 
 		{
 			name: 'lib_get_system_library_uuid',
+			annotations: ANN.READ_ONLY,
 			description: 'Get the UUID of the system (built-in) component library',
 			inputShape: withInstanceParam({}),
 			handler: async ({ instance_id }) => {
@@ -59,6 +64,7 @@ export function libTools(ctx: ToolContext): ToolDef[] {
 
 		{
 			name: 'lib_get_all_libraries',
+			annotations: ANN.READ_ONLY,
 			description: 'Get a list of all available component libraries with their UUIDs and names',
 			inputShape: withInstanceParam({}),
 			handler: async ({ instance_id }) => {
@@ -69,6 +75,7 @@ export function libTools(ctx: ToolContext): ToolDef[] {
 
 		{
 			name: 'lib_get_personal_library_uuid',
+			annotations: ANN.READ_ONLY,
 			description: 'Get the UUID of the user\'s personal library (returns undefined on private deployments)',
 			inputShape: withInstanceParam({}),
 			handler: async ({ instance_id }) => {
@@ -79,6 +86,7 @@ export function libTools(ctx: ToolContext): ToolDef[] {
 
 		{
 			name: 'lib_get_project_library_uuid',
+			annotations: ANN.READ_ONLY,
 			description: 'Get the UUID of the current project\'s library (returns undefined if no project is open)',
 			inputShape: withInstanceParam({}),
 			handler: async ({ instance_id }) => {
@@ -91,6 +99,7 @@ export function libTools(ctx: ToolContext): ToolDef[] {
 
 		{
 			name: 'lib_symbol_get',
+			annotations: ANN.READ_ONLY,
 			description: 'Get a library symbol\'s metadata (name, classification, description) by UUID. Does NOT return the .esym source — use lib_symbol_open_in_editor + document_get_source for that.',
 			inputShape: withInstanceParam({
 				symbolUuid: z.string().describe('Symbol UUID'),
@@ -104,6 +113,7 @@ export function libTools(ctx: ToolContext): ToolDef[] {
 
 		{
 			name: 'lib_symbol_copy',
+			annotations: ANN.WRITE_CREATE,
 			description: 'Copy a library symbol from one library to another (e.g. system → personal). Returns the new symbol UUID. Fails if newSymbolName collides in the target library.',
 			inputShape: withInstanceParam({
 				symbolUuid: z.string().describe('Source symbol UUID'),
@@ -125,6 +135,7 @@ export function libTools(ctx: ToolContext): ToolDef[] {
 
 		{
 			name: 'lib_symbol_delete',
+			annotations: ANN.DESTRUCTIVE,
 			description:
 				'Delete a library symbol. IRREVERSIBLE: no undo, and no backup snapshot is taken (library assets are not documents). Fetch and save the symbol source with lib_symbol_get first if you may need to restore it. Returns boolean success.',
 			inputShape: withInstanceParam({
@@ -139,6 +150,7 @@ export function libTools(ctx: ToolContext): ToolDef[] {
 
 		{
 			name: 'lib_symbol_open_in_editor',
+			annotations: ANN.NAV,
 			description: 'Open a library symbol in the EasyEDA editor as a tab. Returns the new tabId — use that as the document UUID for document_get_source.',
 			inputShape: withInstanceParam({
 				symbolUuid: z.string().describe('Symbol UUID'),
@@ -158,6 +170,7 @@ export function libTools(ctx: ToolContext): ToolDef[] {
 
 		{
 			name: 'lib_symbol_update_document_source',
+			annotations: ANN.DESTRUCTIVE,
 			description: 'Replace a library symbol\'s entire .esym source. The symbol must live in a library you can write to (personal/team/project). Returns boolean success.',
 			inputShape: withInstanceParam({
 				symbolUuid: z.string().describe('Symbol UUID'),
@@ -179,6 +192,7 @@ export function libTools(ctx: ToolContext): ToolDef[] {
 
 		{
 			name: 'lib_device_copy',
+			annotations: ANN.WRITE_CREATE,
 			description: 'Copy a library device from one library to another. Returns the new device UUID. Whether the device\'s symbol/footprint are deep-copied or referenced cross-library is yet to be confirmed empirically.',
 			inputShape: withInstanceParam({
 				deviceUuid: z.string().describe('Source device UUID'),
@@ -200,6 +214,7 @@ export function libTools(ctx: ToolContext): ToolDef[] {
 
 		{
 			name: 'lib_device_modify',
+			annotations: ANN.WRITE_MODIFY,
 			description: 'Modify a library device — re-bind its symbol/footprint, or change name/classification/description/properties. Pass only the fields you want to change. Pass null to clear an optional field. Use the `association` arg to swap to a different symbol or footprint UUID.',
 			inputShape: withInstanceParam({
 				deviceUuid: z.string().describe('Device UUID'),
@@ -243,6 +258,7 @@ export function libTools(ctx: ToolContext): ToolDef[] {
 
 		{
 			name: 'lib_device_delete',
+			annotations: ANN.DESTRUCTIVE,
 			description:
 				'Delete a library device. Does NOT delete its referenced symbol/footprint. IRREVERSIBLE: no undo, and no backup snapshot is taken (library assets are not documents). Record the device data with lib_get_device first if you may need to restore it. Returns boolean success.',
 			inputShape: withInstanceParam({

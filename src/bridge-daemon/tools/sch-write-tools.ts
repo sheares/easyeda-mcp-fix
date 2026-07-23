@@ -2,11 +2,13 @@ import { z } from 'zod';
 import type { ToolDef, ToolContext } from '../types';
 import { withDocumentParam } from './query-params';
 import { backupDocument, backupProject, formatBackupSummary, resolveProjectUuid, type BackupResult } from '../backup';
+import * as ANN from './annotations';
 
 export function schWriteTools(ctx: ToolContext): ToolDef[] {
 	return [
 		{
 			name: 'sch_create_component',
+			annotations: ANN.WRITE_CREATE,
 			description: 'Create a schematic component from a library device reference. Use lib_search_device or lib_get_device_by_lcsc first to get the component object. IMPORTANT: The component object must include uuid, symbolUuid, footprintUuid, AND libraryUuid — passing only {deviceUuid, libraryUuid} will fail with a validation error. Pass the full object returned by lib_get_device_by_lcsc with libraryUuid added (from lib_get_system_library_uuid).',
 			inputShape: withDocumentParam({
 				component: z
@@ -60,6 +62,7 @@ export function schWriteTools(ctx: ToolContext): ToolDef[] {
 			return [
 				{
 					name: 'sch_create_net_flag',
+					annotations: ANN.WRITE_CREATE,
 					description: 'Create one or more Power/Ground/AnalogGround/ProtectGround net flags in the schematic. Pass individual parameters for a single flag, or use "batch" array for multiple flags in one call.',
 					inputShape: withDocumentParam({
 						identification: z
@@ -89,6 +92,7 @@ export function schWriteTools(ctx: ToolContext): ToolDef[] {
 
 				{
 					name: 'sch_create_net_port',
+					annotations: ANN.WRITE_CREATE,
 					description: 'Create one or more IN/OUT/BI directional net ports in the schematic. Pass individual parameters for a single port, or use "batch" array for multiple ports in one call.',
 					inputShape: withDocumentParam({
 						direction: z.enum(['IN', 'OUT', 'BI']).optional().describe('Port direction (for single creation)'),
@@ -117,6 +121,7 @@ export function schWriteTools(ctx: ToolContext): ToolDef[] {
 
 		{
 			name: 'sch_delete_component',
+			annotations: ANN.DESTRUCTIVE,
 			description:
 				'Delete one or more schematic components by their primitive IDs. Irreversible via this API: there is no undo call. The whole document is snapshotted to the local backup repo first; the response includes the backup SHA for recovery.',
 			inputShape: withDocumentParam({
@@ -137,6 +142,7 @@ export function schWriteTools(ctx: ToolContext): ToolDef[] {
 
 		{
 			name: 'sch_modify_component',
+			annotations: ANN.WRITE_MODIFY,
 			description: 'Modify properties of a schematic component (position, rotation, designator, etc.)',
 			inputShape: withDocumentParam({
 				primitiveId: z.string().describe('The component primitive ID'),
@@ -162,6 +168,7 @@ export function schWriteTools(ctx: ToolContext): ToolDef[] {
 
 		{
 			name: 'sch_swap_supplier_part',
+			annotations: ANN.DESTRUCTIVE,
 			description: `Bulk-swap supplier metadata on schematic components matching a filter.
 WARNING (field-confirmed): this swaps supplier METADATA only. The canvas symbol and its label stay those of the OLD part. Use this ONLY when the replacement is a true drop-in with identical schematic symbol and PCB footprint (e.g. same 100nF 0603 cap in a different reel). For any part with a different symbol, footprint, or pin count, delete the component and re-add it instead — otherwise the schematic and BOM will disagree with the canvas symbol/label.
 Uses the same bug-1 metadata guard as sch_modify_component: unspecified fields (otherProperty, uniqueId, position, symbol, etc.) are preserved via a snapshot-and-merge round trip, so a swap that only touches supplierId doesn't wipe the rest of the BOM row.
@@ -224,6 +231,7 @@ Returns { dryRun, swappedCount, swapped:[{primitiveId, designator, page, before,
 
 		{
 			name: 'sch_create_wire',
+			annotations: ANN.WRITE_CREATE,
 			description: 'Create a wire in the schematic defined by a series of coordinate points',
 			inputShape: withDocumentParam({
 				line: z
@@ -255,6 +263,7 @@ Returns { dryRun, swappedCount, swapped:[{primitiveId, designator, page, before,
 
 		{
 			name: 'sch_delete_wire',
+			annotations: ANN.DESTRUCTIVE,
 			description:
 				'Delete one or more wires by their primitive IDs. Irreversible via this API: there is no undo call. The whole document is snapshotted to the local backup repo first; the response includes the backup SHA for recovery.',
 			inputShape: withDocumentParam({
@@ -275,6 +284,7 @@ Returns { dryRun, swappedCount, swapped:[{primitiveId, designator, page, before,
 
 		{
 			name: 'sch_modify_wire',
+			annotations: ANN.WRITE_MODIFY,
 			description: 'Modify properties of an existing wire',
 			inputShape: withDocumentParam({
 				primitiveId: z.string().describe('The wire primitive ID'),
@@ -302,6 +312,7 @@ Returns { dryRun, swappedCount, swapped:[{primitiveId, designator, page, before,
 
 		{
 			name: 'sch_select_primitives',
+			annotations: ANN.NAV,
 			description: `Select and highlight primitives in the schematic editor by designators, pins, or nets.
 Selection is additive — each call adds to the current selection. There is currently no programmatic way to clear the selection; the user must click on empty space in the editor to deselect.
 Pin format: "U1_1" (designator_pinNumber). Components selects the whole component, pins highlights just the pin, nets highlights the entire wire/net.`,
@@ -335,6 +346,7 @@ Pin format: "U1_1" (designator_pinNumber). Components selects the whole componen
 
 		{
 			name: 'sch_set_netlist',
+			annotations: ANN.DESTRUCTIVE,
 			description: 'Update the schematic netlist',
 			inputShape: withDocumentParam({
 				type: z
@@ -351,6 +363,7 @@ Pin format: "U1_1" (designator_pinNumber). Components selects the whole componen
 
 		{
 			name: 'sch_save',
+			annotations: ANN.WRITE_MODIFY,
 			description: 'Save the current schematic document',
 			inputShape: withDocumentParam({}),
 			handler: async (params) => {
@@ -361,6 +374,7 @@ Pin format: "U1_1" (designator_pinNumber). Components selects the whole componen
 
 		{
 			name: 'sch_import_changes',
+			annotations: ANN.DESTRUCTIVE,
 			description: 'Import changes from PCB back into the schematic',
 			inputShape: withDocumentParam({}),
 			handler: async (params) => {

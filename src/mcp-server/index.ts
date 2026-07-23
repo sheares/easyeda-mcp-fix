@@ -79,6 +79,10 @@ async function main() {
 			{
 				description: d.description,
 				inputSchema,
+				// Q3: risk classification travels from the daemon descriptor.
+				// Omitted entirely when the daemon did not supply one, so an
+				// older daemon paired with this proxy still registers cleanly.
+				...(d.annotations ? { annotations: d.annotations } : {}),
 			},
 			(async (args: Record<string, unknown>) => proxy.callTool(d.name, args)) as any,
 		);

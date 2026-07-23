@@ -1,6 +1,7 @@
 import type { ToolDef, ToolContext } from '../types';
 import { z } from 'zod';
 import { withDocumentParam } from './query-params';
+import * as ANN from './annotations';
 
 const LAYER_HANDLERS: Record<string, string> = {
 	get_all: 'pcb.layer.getAll',
@@ -19,6 +20,7 @@ export function pcbLayerTools(ctx: ToolContext): ToolDef[] {
 	return [
 		{
 			name: 'pcb_manage_layers',
+			annotations: ANN.DESTRUCTIVE,
 			description: `Manage PCB layers. Actions:
 - get_all: get all layers with properties
 - select: set active layer (layer: string)

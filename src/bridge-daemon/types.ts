@@ -27,10 +27,26 @@ export interface InstanceInfo {
 // for the intersection shapes produced by `withQueryParams` (the inferred
 // type collapses fields to `unknown` and breaks destructuring of enums etc.).
 // -----------------------------------------------------------------------------
+/**
+ * MCP tool annotations (Q3): machine-readable risk classification, mirroring
+ * the MCP SDK's ToolAnnotations. Clients use these to decide what may run
+ * without a human checkpoint — without them, ~60 pure reads are
+ * indistinguishable at the protocol level from pcb_delete_primitives.
+ * All hints are advisory; descriptions still carry the prose warnings.
+ */
+export interface ToolAnnotations {
+	title?: string;
+	readOnlyHint?: boolean;
+	destructiveHint?: boolean;
+	idempotentHint?: boolean;
+	openWorldHint?: boolean;
+}
+
 export interface ToolDef<Shape extends z.ZodRawShape = z.ZodRawShape> {
 	name: string;
 	description: string;
 	inputShape: Shape;
+	annotations?: ToolAnnotations;
 	handler: (params: Record<string, any>) => Promise<CallToolResult>;
 }
 

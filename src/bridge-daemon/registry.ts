@@ -78,6 +78,7 @@ export class ToolRegistry {
 			name: def.name,
 			description: def.description,
 			inputSchema: jsonSchema,
+			...(def.annotations ? { annotations: def.annotations } : {}),
 		};
 	}
 

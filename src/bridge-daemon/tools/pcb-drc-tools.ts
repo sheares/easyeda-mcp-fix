@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import type { ToolDef, ToolContext } from '../types';
 import { withDocumentParam } from './query-params';
+import * as ANN from './annotations';
 
 const RULE_CONFIG_HANDLERS: Record<string, string> = {
 	get_current_name: 'pcb.drc.getCurrentRuleConfigName',
@@ -56,6 +57,7 @@ export function pcbDrcTools(ctx: ToolContext): ToolDef[] {
 	return [
 		{
 			name: 'pcb_manage_rule_config',
+			annotations: ANN.DESTRUCTIVE,
 			description: `Manage DRC rule configurations. Actions:
 - get_current_name: get current active config name
 - get_by_name: get config by name (configurationName)
@@ -88,6 +90,7 @@ Warning (upstream EDA bug, pro-api-sdk issue #34): saved rule changes read back 
 
 		{
 			name: 'pcb_manage_net_rules',
+			annotations: ANN.DESTRUCTIVE,
 			description: `Manage net-specific design rules. Actions:
 - overwrite_net: overwrite net rules (netRules: array of net rule objects)
 - get_net_by_net: get net-by-net clearance rules
@@ -111,6 +114,7 @@ Warning (upstream EDA bug, pro-api-sdk issue #34): overwritten rules read back c
 
 		{
 			name: 'pcb_manage_net_classes',
+			annotations: ANN.DESTRUCTIVE,
 			description: `Manage net classes. Actions:
 - get_all: get all net class definitions
 - create: create net class (netClassName, nets: string[]; color optional)
@@ -137,6 +141,7 @@ Warning (upstream EDA bug, pro-api-sdk issue #34): overwritten rules read back c
 
 		{
 			name: 'pcb_manage_diff_pairs',
+			annotations: ANN.DESTRUCTIVE,
 			description: `Manage differential pair definitions. Actions:
 - get_all: get all differential pairs
 - create: create diff pair (name, positiveNet, negativeNet)
@@ -171,6 +176,7 @@ Warning (upstream EDA bug, pro-api-sdk issue #34): overwritten rules read back c
 
 		{
 			name: 'pcb_manage_equal_length_groups',
+			annotations: ANN.DESTRUCTIVE,
 			description: `Manage equal-length net groups. Actions:
 - get_all: get all equal-length groups
 - create: create group (name, nets: string[]; color optional)
@@ -197,6 +203,7 @@ Warning (upstream EDA bug, pro-api-sdk issue #34): overwritten rules read back c
 
 		{
 			name: 'pcb_manage_pad_pair_groups',
+			annotations: ANN.DESTRUCTIVE,
 			description: `Manage pad pair groups for length-matching. Actions:
 - create: create group (name, padPairs: [[padId1, padId2], ...])
 - delete: delete group (name)

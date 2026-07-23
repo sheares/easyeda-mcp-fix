@@ -6,6 +6,7 @@ import { withInstanceParam, withDocumentParam } from './query-params';
 import { backupDocument, backupProject, formatBackupSummary, type BackupResult } from '../backup';
 import { validateByDocType, type DocumentContext } from './schema-tools';
 import type { ValidationReport } from '../../lib/schema';
+import * as ANN from './annotations';
 
 /**
  * Fast-batch-edit workflow (when surfaced to agents):
@@ -86,6 +87,7 @@ export function fileManagerTools(ctx: ToolContext): ToolDef[] {
 	return [
 		{
 			name: 'document_get_source',
+			annotations: ANN.READ_ONLY,
 			description: `Get the raw source code of the currently active document (schematic page, PCB, or panel).
 Returns the document as a string in EasyEDA's internal format (newline-delimited JSON arrays).
 Use editor_open_document to switch to the desired document first, then call this tool.
@@ -114,6 +116,7 @@ for a structured validation report.${WORKFLOW_HINT}`,
 		},
 		{
 			name: 'document_set_source',
+			annotations: ANN.DESTRUCTIVE,
 			description: `Replace the source code of the currently active document.
 Accepts the full document source as a string (same format returned by document_get_source).
 Returns { success, backup: { sha, path }, validation: {...} } on success, or throws if
@@ -154,6 +157,7 @@ backup.sha references the pre-edit state. Validation runs only for schematic doc
 		},
 		{
 			name: 'document_save_to_file',
+			annotations: ANN.WRITE_LOCAL_FILE,
 			description: `Save the source code of the currently active document to a local file.
 Fetches the document source from EasyEDA and writes it directly to disk.
 The file will contain the document in EasyEDA's internal format (newline-delimited JSON arrays).
@@ -184,6 +188,7 @@ that the data is bad.${WORKFLOW_HINT}`,
 		},
 		{
 			name: 'document_load_from_file',
+			annotations: ANN.DESTRUCTIVE,
 			description: `Load document source from a local file and push it into the currently active document.
 Reads the file from disk and calls setDocumentSource to replace the document contents.
 The file must contain valid EasyEDA document source (same format as document_get_source / document_save_to_file).
@@ -222,6 +227,7 @@ other types skip with a status.${WORKFLOW_HINT}`,
 		},
 		{
 			name: 'project_export_file',
+			annotations: ANN.WRITE_LOCAL_FILE,
 			description: `Export the entire current project as a .epro file (ZIP archive) saved directly to a local path.
 The .epro file contains: project.json (manifest with board/schematic/PCB associations),
 SHEET/ (schematics), PCB/ (layouts), SYMBOL/ (component symbols), FOOTPRINT/ (footprints),
@@ -241,6 +247,7 @@ All internal files are human-readable newline-delimited JSON arrays.${WORKFLOW_H
 		},
 		{
 			name: 'project_import_file',
+			annotations: ANN.DESTRUCTIVE,
 			description: `Import a project file (.epro) from a local path into EasyEDA Pro.
 Can import into an existing project (replacing its contents) or create a new project.
 Supports EasyEDA Pro, Altium, KiCad, EAGLE, PADS, and LTspice formats.

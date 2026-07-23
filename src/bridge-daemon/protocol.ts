@@ -79,6 +79,16 @@ export interface ToolDescriptor {
 	name: string;
 	description: string;
 	inputSchema: Record<string, unknown>; // JSON Schema for the tool's arguments
+	// MCP tool annotations (Q3): readOnlyHint / destructiveHint /
+	// idempotentHint / openWorldHint. Optional so an older daemon paired with
+	// a newer proxy (or vice versa) keeps working.
+	annotations?: {
+		title?: string;
+		readOnlyHint?: boolean;
+		destructiveHint?: boolean;
+		idempotentHint?: boolean;
+		openWorldHint?: boolean;
+	};
 }
 
 // MCP `CallToolResult` shape, returned by every tool handler verbatim.

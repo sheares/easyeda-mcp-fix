@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { writeFile, mkdir } from 'node:fs/promises';
 import { dirname, isAbsolute } from 'node:path';
 import { withDocumentParam } from './query-params';
+import * as ANN from './annotations';
 
 const EXPORT_HANDLER_MAP: Record<string, string> = {
 	dsn: 'pcb.manufacture.getDsnFile',
@@ -58,6 +59,7 @@ export function manufactureTools(ctx: ToolContext): ToolDef[] {
 	return [
 		{
 			name: 'pcb_export',
+			annotations: ANN.READ_ONLY,
 			description: `Export the PCB design in various formats. Returns { fileName, data (Base64), size }.
 
 Formats: dsn (for FreeRouting), gerber (manufacturing), bom (bill of materials), pick_and_place (assembly),
@@ -90,6 +92,7 @@ ${OPTIONS_HINT}`,
 
 		{
 			name: 'pcb_export_to_file',
+			annotations: ANN.WRITE_LOCAL_FILE,
 			description: `Export the PCB design in various formats directly to a local file path — preferred
 over pcb_export when the output is large (gerber/odbplus zips, 3d STEP, pdf), since it avoids
 shipping the bytes back through the MCP response as Base64.
@@ -150,6 +153,7 @@ ${OPTIONS_HINT}`,
 
 		{
 			name: 'pcb_import',
+			annotations: ANN.DESTRUCTIVE,
 			description: `Import routing or layout result files into the PCB (Base64-encoded).
 Formats: autoroute_json (JSON autoroute), autolayout_json (JSON autolayout), autoroute_ses (FreeRouting SES).`,
 			inputShape: withDocumentParam({

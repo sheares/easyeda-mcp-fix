@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import type { ToolDef, ToolContext } from '../types';
+import * as ANN from './annotations';
 
 /**
  * Built-in tools that previously lived in mcp-server/index.ts. These are
@@ -10,6 +11,7 @@ export function builtinTools(ctx: ToolContext): ToolDef[] {
 	return [
 		{
 			name: 'server_info',
+			annotations: ANN.READ_ONLY,
 			description: 'Get MCP server status: WebSocket port, connection state, connected instances, and allowed origins',
 			inputShape: {},
 			handler: async () => {
@@ -35,6 +37,7 @@ export function builtinTools(ctx: ToolContext): ToolDef[] {
 		},
 		{
 			name: 'bridge_restart',
+			annotations: ANN.DESTRUCTIVE,
 			description: `Restart the EasyEDA bridge daemon. Use this only after the bridge-daemon code itself
 has changed (new tools, fixed handler logic, etc.) and you want the new code loaded without manually
 killing the process.
@@ -74,6 +77,7 @@ Returns { ok, pidWas, message } before the daemon exits (~100ms grace for respon
 		},
 		{
 			name: 'list_instances',
+			annotations: ANN.READ_ONLY,
 			description: 'List all connected EasyEDA Pro instances with their current state (project, active document, open tabs). Use this to find the instance_id you need for other tools when multiple instances are connected.',
 			inputShape: {},
 			handler: async () => {

@@ -1,11 +1,13 @@
 import type { ToolDef, ToolContext } from '../types';
 import { z } from 'zod';
 import { withDocumentParam, withQueryParams, PCB_COORD_NOTE } from './query-params';
+import * as ANN from './annotations';
 
 export function analysisTools(ctx: ToolContext): ToolDef[] {
 	return [
 		{
 			name: 'pcb_highlight_net',
+			annotations: ANN.NAV,
 			description: 'Highlight a specific net in the PCB editor for visual inspection',
 			inputShape: withDocumentParam({
 				net: z.string().describe('Net name to highlight'),
@@ -18,6 +20,7 @@ export function analysisTools(ctx: ToolContext): ToolDef[] {
 
 		{
 			name: 'pcb_select_net',
+			annotations: ANN.NAV,
 			description: 'Select all primitives of a specific net in the PCB editor',
 			inputShape: withDocumentParam({
 				net: z.string().describe('Net name to select'),
@@ -30,6 +33,7 @@ export function analysisTools(ctx: ToolContext): ToolDef[] {
 
 		{
 			name: 'pcb_clear_selection',
+			annotations: ANN.NAV,
 			description: 'Clear all selection in the PCB editor',
 			inputShape: withDocumentParam({}),
 			handler: async (params) => {
@@ -40,6 +44,7 @@ export function analysisTools(ctx: ToolContext): ToolDef[] {
 
 		{
 			name: 'pcb_navigate_to',
+			annotations: ANN.NAV,
 			description: `Navigate the PCB editor viewport to specific coordinates. ${PCB_COORD_NOTE}`,
 			inputShape: withDocumentParam({
 				x: z.number().describe('X coordinate to navigate to'),
@@ -53,6 +58,7 @@ export function analysisTools(ctx: ToolContext): ToolDef[] {
 
 		{
 			name: 'pcb_navigate_to_region',
+			annotations: ANN.NAV,
 			description: `Navigate and zoom the PCB editor viewport to fit a specific region. ${PCB_COORD_NOTE}`,
 			inputShape: withDocumentParam({
 				left: z.number().describe('Left boundary X'),
@@ -68,6 +74,7 @@ export function analysisTools(ctx: ToolContext): ToolDef[] {
 
 		{
 			name: 'pcb_zoom_to_board',
+			annotations: ANN.NAV,
 			description: 'Zoom the viewport to fit the entire board outline',
 			inputShape: withDocumentParam({}),
 			handler: async (params) => {
@@ -78,6 +85,7 @@ export function analysisTools(ctx: ToolContext): ToolDef[] {
 
 		{
 			name: 'pcb_get_primitive_at_point',
+			annotations: ANN.READ_ONLY,
 			description: `Get the primitive at a specific point on the PCB. ${PCB_COORD_NOTE}`,
 			inputShape: withDocumentParam({
 				x: z.number().describe('X coordinate'),
@@ -91,6 +99,7 @@ export function analysisTools(ctx: ToolContext): ToolDef[] {
 
 		{
 			name: 'pcb_get_primitives_in_region',
+			annotations: ANN.READ_ONLY,
 			description: `Get all primitives within a rectangular region on the PCB. ${PCB_COORD_NOTE}`,
 			inputShape: withQueryParams({
 				left: z.number().describe('Left boundary X'),
@@ -110,6 +119,7 @@ export function analysisTools(ctx: ToolContext): ToolDef[] {
 
 		{
 			name: 'pcb_canvas_origin',
+			annotations: ANN.WRITE_MODIFY,
 			description: `Get or set the canvas origin offset relative to data origin. ${PCB_COORD_NOTE}`,
 			inputShape: withDocumentParam({
 				action: z.enum(['get', 'set']).describe('"get" to read, "set" to write'),
@@ -128,6 +138,7 @@ export function analysisTools(ctx: ToolContext): ToolDef[] {
 
 		{
 			name: 'pcb_convert_coordinates',
+			annotations: ANN.READ_ONLY,
 			description: `Convert between canvas coordinates and data coordinates. ${PCB_COORD_NOTE}`,
 			inputShape: withDocumentParam({
 				direction: z.enum(['canvasToData', 'dataToCanvas']).describe('Conversion direction'),
@@ -146,6 +157,7 @@ export function analysisTools(ctx: ToolContext): ToolDef[] {
 
 		{
 			name: 'pcb_import_changes',
+			annotations: ANN.DESTRUCTIVE,
 			description:
 				'Import changes from schematic into the PCB (sync schematic to PCB). Warning (upstream EDA bug, pro-api-sdk issue #33): pads of components newly placed by this call can read back with a null pad number until the PCB document is reloaded, and DRC may report an unstructured "Netlist Error". Close and reopen the PCB document (or reload via editor_open_document) before reading pads of freshly placed components.',
 			inputShape: withDocumentParam({

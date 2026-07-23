@@ -2,6 +2,7 @@ import { z } from 'zod';
 import type { ToolDef, ToolContext } from '../types';
 import { withDocumentParam, PCB_COORD_NOTE } from './query-params';
 import { backupDocument, formatBackupSummary } from '../backup';
+import * as ANN from './annotations';
 
 const layerParam = (description: string) => z.union([z.string(), z.number()]).describe(description);
 
@@ -36,6 +37,7 @@ export function writeTools(ctx: ToolContext): ToolDef[] {
 
 		{
 			name: 'pcb_create_track',
+			annotations: ANN.WRITE_CREATE,
 			description: `Create a single track segment (line) between two points on a specified layer and net. ${PCB_COORD_NOTE}`,
 			inputShape: withDocumentParam({
 				net: z.string().describe('Net name for the track'),
@@ -54,6 +56,7 @@ export function writeTools(ctx: ToolContext): ToolDef[] {
 
 		{
 			name: 'pcb_create_polyline_track',
+			annotations: ANN.WRITE_CREATE,
 			description: `Create a multi-segment polyline track defined by a series of points. ${PCB_COORD_NOTE}`,
 			inputShape: withDocumentParam({
 				net: z.string().describe('Net name for the track'),
@@ -72,6 +75,7 @@ export function writeTools(ctx: ToolContext): ToolDef[] {
 
 		{
 			name: 'pcb_create_via',
+			annotations: ANN.WRITE_CREATE,
 			description:
 				'Create a via at the specified position. Warning (upstream EDA bug, pro-api-sdk issue #32): if an internal plane (PLANE layer) has already been generated, a via on a different net created afterwards does NOT get its anti-pad cut. Rebuilding pours does not fix it; DRC reports "Plane Zone to Via". Regenerate the internal plane after placing vias. This is a fabrication risk, so do not ship until that DRC error is clear. ' + PCB_COORD_NOTE,
 			inputShape: withDocumentParam({
@@ -90,6 +94,7 @@ export function writeTools(ctx: ToolContext): ToolDef[] {
 
 		{
 			name: 'pcb_create_arc',
+			annotations: ANN.WRITE_CREATE,
 			description: `Create an arc track segment on the PCB. ${PCB_COORD_NOTE}`,
 			inputShape: withDocumentParam({
 				net: z.string().describe('Net name'),
@@ -109,6 +114,7 @@ export function writeTools(ctx: ToolContext): ToolDef[] {
 
 		{
 			name: 'pcb_create_pad',
+			annotations: ANN.WRITE_CREATE,
 			description: `Create a standalone pad on the PCB. ${PCB_COORD_NOTE}`,
 			inputShape: withDocumentParam({
 				layer: layerParam(LAYER_DESC),
@@ -126,6 +132,7 @@ export function writeTools(ctx: ToolContext): ToolDef[] {
 
 		{
 			name: 'pcb_create_pour',
+			annotations: ANN.WRITE_CREATE,
 			description:
 				'Create a copper pour region on the PCB. Two upstream EDA bugs to note: (1) pours reflow using the design-rule snapshot taken when the document was opened, so rules written via the API do not affect reflow until the PCB document is closed and reopened (pro-api-sdk issue #34); reopen before rebuilding pours after rule changes. (2) Rebuilding a pour does not cut internal-plane anti-pads for different-net vias created after plane generation (issue #32); regenerate the plane instead. ' + PCB_COORD_NOTE,
 			inputShape: withDocumentParam({
@@ -148,6 +155,7 @@ export function writeTools(ctx: ToolContext): ToolDef[] {
 
 		{
 			name: 'pcb_create_fill',
+			annotations: ANN.WRITE_CREATE,
 			description: `Create a fill region on the PCB. ${PCB_COORD_NOTE}`,
 			inputShape: withDocumentParam({
 				layer: layerParam(LAYER_DESC),
@@ -165,6 +173,7 @@ export function writeTools(ctx: ToolContext): ToolDef[] {
 
 		{
 			name: 'pcb_create_region',
+			annotations: ANN.WRITE_CREATE,
 			description: `Create a design rule region (keepout/constraint area) on the PCB. ${PCB_COORD_NOTE}`,
 			inputShape: withDocumentParam({
 				layer: layerParam(LAYER_DESC),
@@ -185,6 +194,7 @@ export function writeTools(ctx: ToolContext): ToolDef[] {
 
 		{
 			name: 'pcb_move_component',
+			annotations: ANN.WRITE_MODIFY,
 			description: `Move and/or rotate a component. Can also change its layer (flip), lock status, designator, etc. ${PCB_COORD_NOTE}`,
 			inputShape: withDocumentParam({
 				primitiveId: z.string().describe('The component primitive ID'),
@@ -203,6 +213,7 @@ export function writeTools(ctx: ToolContext): ToolDef[] {
 
 		{
 			name: 'pcb_modify_track',
+			annotations: ANN.WRITE_MODIFY,
 			description: `Modify properties of an existing track segment (line). ${PCB_COORD_NOTE}`,
 			inputShape: withDocumentParam({
 				primitiveId: z.string().describe('The track primitive ID'),
@@ -222,6 +233,7 @@ export function writeTools(ctx: ToolContext): ToolDef[] {
 
 		{
 			name: 'pcb_modify_primitive',
+			annotations: ANN.WRITE_MODIFY,
 			description: `Modify properties of a PCB primitive. Property keys vary by type:
 - via: net, x, y, holeDiameter, diameter, viaType
 - polyline: net, layer, lineWidth
@@ -251,6 +263,7 @@ ${PCB_COORD_NOTE}`,
 
 		{
 			name: 'pcb_delete_primitives',
+			annotations: ANN.DESTRUCTIVE,
 			description:
 				'Delete one or more PCB primitives by type and IDs. Irreversible via this API: there is no undo call. The whole document is snapshotted to the local backup repo first; the response includes the backup SHA for recovery.',
 			inputShape: withDocumentParam({
@@ -276,6 +289,7 @@ ${PCB_COORD_NOTE}`,
 
 		{
 			name: 'pcb_save',
+			annotations: ANN.WRITE_MODIFY,
 			description: 'Save the current PCB document',
 			inputShape: withDocumentParam({
 				uuid: z.string().optional().describe('Document UUID (uses current document if not provided)'),

@@ -1,6 +1,7 @@
 import type { ToolDef, ToolContext } from '../types';
 import { z } from 'zod';
 import { withDocumentParam, withQueryParams } from './query-params';
+import * as ANN from './annotations';
 
 const GET_ALL_HANDLER_MAP: Record<string, string> = {
 	component: 'pcb.getAll.component',
@@ -42,6 +43,7 @@ export function readTools(ctx: ToolContext): ToolDef[] {
 	return [
 		{
 			name: 'pcb_get_all_primitives',
+			annotations: ANN.READ_ONLY,
 			description: `Get all primitives of a specific type on the PCB, with optional filters.
 Filters by type: component(layer), track/polyline/arc(net,layer), via(net), pad(layer,net), pour/fill(layer,net), region(layer).
 Component fields: primitiveId, designator, name, layer, x, y, rotation, primitiveLock, addIntoBom.
@@ -62,6 +64,7 @@ Pad fields: primitiveId, net, layer, padNumber, x, y.`,
 
 		{
 			name: 'pcb_get_primitives_by_id',
+			annotations: ANN.READ_ONLY,
 			description: 'Get one or more PCB primitives by their type and primitive ID(s)',
 			inputShape: withQueryParams({
 				type: z.enum(PRIMITIVE_TYPES).describe('Primitive type'),
@@ -77,6 +80,7 @@ Pad fields: primitiveId, net, layer, padNumber, x, y.`,
 
 		{
 			name: 'pcb_get_all_nets',
+			annotations: ANN.READ_ONLY,
 			description: 'Get all net names in the PCB design',
 			inputShape: withDocumentParam({}),
 			handler: async (params) => {
@@ -87,6 +91,7 @@ Pad fields: primitiveId, net, layer, padNumber, x, y.`,
 
 		{
 			name: 'pcb_get_net_primitives',
+			annotations: ANN.READ_ONLY,
 			description: 'Get all primitives (tracks, pads, vias, etc.) belonging to a specific net',
 			inputShape: withQueryParams({
 				net: z.string().describe('The net name to query'),
@@ -103,6 +108,7 @@ Pad fields: primitiveId, net, layer, padNumber, x, y.`,
 
 		{
 			name: 'pcb_get_net_length',
+			annotations: ANN.READ_ONLY,
 			description: 'Get the total routed length of a specific net',
 			inputShape: withDocumentParam({
 				net: z.string().describe('The net name'),
@@ -115,6 +121,7 @@ Pad fields: primitiveId, net, layer, padNumber, x, y.`,
 
 		{
 			name: 'pcb_get_design_rules',
+			annotations: ANN.READ_ONLY,
 			description: 'Get the current PCB design rule configuration (clearance, width, etc.)',
 			inputShape: withDocumentParam({}),
 			handler: async (params) => {
@@ -125,6 +132,7 @@ Pad fields: primitiveId, net, layer, padNumber, x, y.`,
 
 		{
 			name: 'pcb_get_net_rules',
+			annotations: ANN.READ_ONLY,
 			description: 'Get net-specific design rules',
 			inputShape: withDocumentParam({}),
 			handler: async (params) => {
@@ -135,6 +143,7 @@ Pad fields: primitiveId, net, layer, padNumber, x, y.`,
 
 		{
 			name: 'pcb_get_component_pins',
+			annotations: ANN.READ_ONLY,
 			description: `Get all pins/pads of a specific component by its primitive ID.
 Pin fields: primitiveId, padNumber, net, layer, x, y.
 Note (upstream EDA bug, pro-api-sdk issue #33): for components placed via the API in the current editing session, padNumber can read back null until the PCB document is closed and reopened.`,
@@ -149,6 +158,7 @@ Note (upstream EDA bug, pro-api-sdk issue #33): for components placed via the AP
 
 		{
 			name: 'pcb_run_drc',
+			annotations: ANN.READ_ONLY,
 			description: 'Run Design Rule Check (DRC) on the PCB. Returns violations if verbose is true, or just pass/fail.',
 			inputShape: withQueryParams({
 				strict: z.boolean().default(true).describe('Whether to run strict DRC checks'),
@@ -163,6 +173,7 @@ Note (upstream EDA bug, pro-api-sdk issue #33): for components placed via the AP
 
 		{
 			name: 'pcb_get_selected',
+			annotations: ANN.READ_ONLY,
 			description: 'Get currently selected primitives in the PCB editor',
 			inputShape: withQueryParams({}),
 			handler: async (params) => {

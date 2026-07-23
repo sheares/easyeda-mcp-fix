@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { readFile } from 'node:fs/promises';
 import type { ToolDef, ToolContext } from '../types';
 import { withDocumentParam } from './query-params';
+import * as ANN from './annotations';
 import {
 	parseEschSource,
 	parseEsymSource,
@@ -112,6 +113,7 @@ export function schemaTools(ctx: ToolContext): ToolDef[] {
 	return [
 		{
 			name: 'document_validate',
+			annotations: ANN.READ_ONLY,
 			description: `Validate a document's source against the Zod-backed EasyEDA schema.
 Runs on the currently active document by default, or on a local file if filePath is provided.
 Schematic (.esch, documentType=1) and PCB (.epcb, documentType=3) documents are validated;

@@ -1,11 +1,13 @@
 import { z } from 'zod';
 import type { ToolDef, ToolContext } from '../types';
 import { withDocumentParam, withQueryParams } from './query-params';
+import * as ANN from './annotations';
 
 export function schReadTools(ctx: ToolContext): ToolDef[] {
 	return [
 		{
 			name: 'sch_get_all_components',
+			annotations: ANN.READ_ONLY,
 			description: `Get all components in the schematic with their properties, positions, rotations, designators, etc.
 To identify what a component is, check: designator (e.g. "R1", "U3"), name (part name/number), manufacturer, manufacturerId (manufacturer part number), supplier, supplierId (supplier part number, e.g. JLCPCB/LCSC number), and footprint.
 All fields: primitiveId, componentType, designator, name, x, y, rotation, mirror, addIntoBom, addIntoPcb, footprint, manufacturer, manufacturerId, supplier, supplierId, net, otherProperty.
@@ -41,6 +43,7 @@ Template expressions like ={Manufacturer Part} are automatically resolved to the
 
 		{
 			name: 'sch_get_component',
+			annotations: ANN.READ_ONLY,
 			description: 'Get one or more schematic components by primitive ID(s)',
 			inputShape: withDocumentParam({
 				primitiveIds: z
@@ -67,6 +70,7 @@ Template expressions like ={Manufacturer Part} are automatically resolved to the
 
 		{
 			name: 'sch_get_component_pins',
+			annotations: ANN.READ_ONLY,
 			description: `Get all pins of a schematic component by its primitive ID.
 Pin fields: primitiveId, pinNumber, name, net, x, y, rotation.
 Each pin includes a net field with the net name it is connected to (empty string if unconnected).
@@ -88,6 +92,7 @@ Pins connected to $-prefixed nets (like $R11_1) are on unnamed nets that still c
 
 		{
 			name: 'sch_get_all_wires',
+			annotations: ANN.READ_ONLY,
 			description: 'Get all wires in the schematic, optionally filtered by net name',
 			inputShape: withQueryParams({
 				net: z
@@ -103,6 +108,7 @@ Pins connected to $-prefixed nets (like $R11_1) are on unnamed nets that still c
 
 		{
 			name: 'sch_get_wire',
+			annotations: ANN.READ_ONLY,
 			description: 'Get one or more wires by primitive ID(s)',
 			inputShape: withDocumentParam({
 				primitiveIds: z
@@ -117,6 +123,7 @@ Pins connected to $-prefixed nets (like $R11_1) are on unnamed nets that still c
 
 		{
 			name: 'sch_get_selected',
+			annotations: ANN.READ_ONLY,
 			description: 'Get all currently selected primitives in the schematic editor',
 			inputShape: withQueryParams({}),
 			handler: async (params) => {
@@ -127,6 +134,7 @@ Pins connected to $-prefixed nets (like $R11_1) are on unnamed nets that still c
 
 		{
 			name: 'sch_get_selected_ids',
+			annotations: ANN.READ_ONLY,
 			description: 'Get primitive IDs of all currently selected primitives in the schematic editor',
 			inputShape: withDocumentParam({}),
 			handler: async (params) => {
@@ -137,6 +145,7 @@ Pins connected to $-prefixed nets (like $R11_1) are on unnamed nets that still c
 
 		{
 			name: 'sch_get_primitive',
+			annotations: ANN.READ_ONLY,
 			description: 'Get a schematic primitive by its ID with all properties',
 			inputShape: withDocumentParam({
 				id: z.string().describe('The primitive ID'),
@@ -149,6 +158,7 @@ Pins connected to $-prefixed nets (like $R11_1) are on unnamed nets that still c
 
 		{
 			name: 'sch_get_primitive_type',
+			annotations: ANN.READ_ONLY,
 			description: 'Get the type of a schematic primitive by its ID',
 			inputShape: withDocumentParam({
 				id: z.string().describe('The primitive ID'),
@@ -161,6 +171,7 @@ Pins connected to $-prefixed nets (like $R11_1) are on unnamed nets that still c
 
 		{
 			name: 'sch_get_primitive_bbox',
+			annotations: ANN.READ_ONLY,
 			description: 'Get the bounding box of one or more schematic primitives',
 			inputShape: withDocumentParam({
 				primitiveIds: z.array(z.string()).describe('Array of primitive IDs'),
@@ -173,6 +184,7 @@ Pins connected to $-prefixed nets (like $R11_1) are on unnamed nets that still c
 
 		{
 			name: 'sch_get_netlist',
+			annotations: ANN.READ_ONLY,
 			description: `Get the raw schematic netlist in the specified format. WARNING: The JLCEDA format response is very large (100KB+).
 Prefer sch_get_connectivity for connectivity questions — it returns the same net/pin data in a much more compact format with resolved part names.
 Only use this tool when you need a specific netlist export format (Allegro, PADS, etc.) or the full raw netlist data.`,
@@ -190,6 +202,7 @@ Only use this tool when you need a specific netlist export format (Allegro, PADS
 
 		{
 			name: 'sch_export_bom',
+			annotations: ANN.READ_ONLY,
 			description: `Export the schematic-side BOM as parsed rows (one object per BOM line, keyed by column header).
 The schematic BOM is the source of truth for supplier metadata — recommended for verifying BOM integrity after batch edits (e.g. confirm Supplier Part / LCSC numbers survived a sch_modify_component run).
 Columns follow the EasyEDA BOM template, e.g. "Designator", "Quantity", "Manufacturer Part", "Supplier Part".
@@ -206,6 +219,7 @@ For a PCB-side BOM file (xlsx/csv, base64), use pcb_export with format:"bom" ins
 
 		{
 			name: 'sch_get_connectivity',
+			annotations: ANN.READ_ONLY,
 			description: `Get compact connectivity data: which nets connect which component pins, with resolved part names.
 Much smaller than sch_get_netlist — use this for connectivity questions.
 Returns nets (net → pin connections like "U3.2(GND)") and components (designator → part + pin assignments).
@@ -243,6 +257,7 @@ Use the depth parameter (default 2) to automatically trace through $-prefixed ne
 
 		{
 			name: 'sch_run_drc',
+			annotations: ANN.READ_ONLY,
 			description:
 				'Run Design Rule Check (DRC) on the schematic. Returns { passed, errors? }. Some EDA Pro builds report only a pass/fail boolean at runtime (upstream pro-api-sdk issue #27); in that case "errors" is absent and a note says per-violation detail is unavailable.',
 			inputShape: withQueryParams({
