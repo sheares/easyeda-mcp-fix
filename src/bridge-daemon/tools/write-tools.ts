@@ -6,6 +6,18 @@ import * as ANN from './annotations';
 
 const layerParam = (description: string) => z.union([z.string(), z.number()]).describe(description);
 
+// D9: closed shapes (pour, fill, region) accept the same ergonomic point
+// array as pcb_create_polyline_track, auto-closed and converted to L-mode on
+// the extension side (toClosedPolygonSource), OR the raw L-mode source array.
+const closedPolygonParam = z
+	.union([
+		z.array(z.object({ x: z.number(), y: z.number() })).min(3),
+		z.array(z.union([z.string(), z.number()])),
+	])
+	.describe(
+		'Either an ergonomic point array [{x, y}, ...] (minimum 3 points; the ring is closed automatically and converted to L-mode), or a raw EasyEDA L-mode source array [x1, y1, "L", x2, y2, ..., x1, y1] — coordinates of the first point, then the "L" token, then the remaining points (closed: last point repeats the first)',
+	);
+
 const LAYER_DESC =
 	'Layer name (e.g. "TopLayer", "BottomLayer", "Inner1".."Inner30", "Multi") or numeric EPCB_LayerId (1=Top, 2=Bottom, 12=Multi). Names are converted to the numeric id EasyEDA requires.';
 
@@ -138,9 +150,7 @@ export function writeTools(ctx: ToolContext): ToolDef[] {
 			inputShape: withDocumentParam({
 				net: z.string().describe('Net name for the pour'),
 				layer: layerParam(LAYER_DESC),
-				polygon: z
-					.array(z.union([z.string(), z.number()]))
-					.describe('Polygon source array in EasyEDA L-mode order: [x1, y1, "L", x2, y2, ..., x1, y1] — coordinates of the first point, then the "L" token, then the remaining points (closed: last point repeats the first)'),
+				polygon: closedPolygonParam,
 				pourFillMethod: z.enum(['solid', '45grid', '90grid']).optional().describe('Fill method'),
 				preserveSilos: z.boolean().optional().describe('Whether to preserve copper islands'),
 				pourName: z.string().optional().describe('Name for the pour region'),
@@ -159,9 +169,7 @@ export function writeTools(ctx: ToolContext): ToolDef[] {
 			description: `Create a fill region on the PCB. ${PCB_COORD_NOTE}`,
 			inputShape: withDocumentParam({
 				layer: layerParam(LAYER_DESC),
-				polygon: z
-					.array(z.union([z.string(), z.number()]))
-					.describe('Polygon source array in EasyEDA L-mode order: [x1, y1, "L", x2, y2, ..., x1, y1] — coordinates of the first point, then the "L" token, then the remaining points (closed: last point repeats the first)'),
+				polygon: closedPolygonParam,
 				net: z.string().optional().describe('Net name'),
 				lineWidth: z.number().optional().describe('Line width'),
 			}),
@@ -177,9 +185,7 @@ export function writeTools(ctx: ToolContext): ToolDef[] {
 			description: `Create a design rule region (keepout/constraint area) on the PCB. ${PCB_COORD_NOTE}`,
 			inputShape: withDocumentParam({
 				layer: layerParam(LAYER_DESC),
-				polygon: z
-					.array(z.union([z.string(), z.number()]))
-					.describe('Polygon source array in EasyEDA L-mode order: [x1, y1, "L", x2, y2, ..., x1, y1] — coordinates of the first point, then the "L" token, then the remaining points (closed: last point repeats the first)'),
+				polygon: closedPolygonParam,
 				ruleType: z.array(z.string()).optional().describe('Rule type(s) for the region'),
 				regionName: z.string().optional().describe('Name for the region'),
 				lineWidth: z.number().optional().describe('Outline width'),
@@ -290,10 +296,12 @@ ${PCB_COORD_NOTE}`,
 		{
 			name: 'pcb_save',
 			annotations: ANN.WRITE_MODIFY,
-			description: 'Save the current PCB document',
-			inputShape: withDocumentParam({
-				uuid: z.string().optional().describe('Document UUID (uses current document if not provided)'),
-			}),
+			// D7: no `uuid` param — the underlying save() takes no arguments and
+			// saves the ACTIVE document; the required `document` routing param is
+			// what selects the target. The old advertised-but-ignored uuid let a
+			// model believe it saved a non-active document.
+			description: 'Save the PCB document selected by the "document" parameter (the editor switches to it first, then saves the active document).',
+			inputShape: withDocumentParam({}),
 			handler: async (params) => {
 				const result = await ctx.sendToExtension('pcb.document.save', params);
 				return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };

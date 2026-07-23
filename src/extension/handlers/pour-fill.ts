@@ -1,3 +1,5 @@
+import { toClosedPolygonSource } from './pcb-params';
+
 export const pourFillHandlers: Record<string, (params: Record<string, any>) => Promise<any>> = {
 	// === Pour ===
 
@@ -10,7 +12,7 @@ export const pourFillHandlers: Record<string, (params: Record<string, any>) => P
 	},
 
 	'pcb.create.pour': async (params) => {
-		const polygon = eda.pcb_MathPolygon.createPolygon(params.polygon);
+		const polygon = eda.pcb_MathPolygon.createPolygon(toClosedPolygonSource(params.polygon) as any);
 		if (!polygon) {
 			throw new Error('Invalid polygon data');
 		}
@@ -46,7 +48,7 @@ export const pourFillHandlers: Record<string, (params: Record<string, any>) => P
 	},
 
 	'pcb.create.fill': async (params) => {
-		const polygon = eda.pcb_MathPolygon.createPolygon(params.polygon);
+		const polygon = eda.pcb_MathPolygon.createPolygon(toClosedPolygonSource(params.polygon) as any);
 		if (!polygon) {
 			throw new Error('Invalid polygon data');
 		}

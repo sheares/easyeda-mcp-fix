@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import * as assert from 'node:assert/strict';
-import { toLayerId, normalizePcbParams, toPolygonSource } from '../src/extension/handlers/pcb-params';
+import { toLayerId, normalizePcbParams, toPolygonSource, toClosedPolygonSource } from '../src/extension/handlers/pcb-params';
 
 test('toLayerId maps documented layer names to numeric EPCB_LayerId', () => {
 	assert.equal(toLayerId('TopLayer'), 1);
@@ -89,4 +89,27 @@ test('toPolygonSource passes flat source arrays and non-arrays through', () => {
 	assert.equal(toPolygonSource(source), source);
 	assert.equal(toPolygonSource(undefined), undefined);
 	assert.deepEqual(toPolygonSource([]), []);
+});
+
+// D9: pour/fill/region take closed rings; the point-array form is closed
+// automatically before L-mode conversion.
+test('toClosedPolygonSource closes an open point ring', () => {
+	assert.deepEqual(
+		toClosedPolygonSource([{ x: 0, y: 0 }, { x: 10, y: 0 }, { x: 10, y: 5 }]),
+		[0, 0, 'L', 10, 0, 10, 5, 0, 0],
+	);
+});
+
+test('toClosedPolygonSource leaves an already-closed ring alone', () => {
+	assert.deepEqual(
+		toClosedPolygonSource([{ x: 0, y: 0 }, { x: 10, y: 0 }, { x: 10, y: 5 }, { x: 0, y: 0 }]),
+		[0, 0, 'L', 10, 0, 10, 5, 0, 0],
+	);
+});
+
+test('toClosedPolygonSource passes flat source arrays and non-arrays through untouched', () => {
+	const source = [0, 0, 'L', 10, 0, 10, 5, 0, 0];
+	assert.equal(toClosedPolygonSource(source), source);
+	assert.equal(toClosedPolygonSource(undefined), undefined);
+	assert.deepEqual(toClosedPolygonSource([]), []);
 });

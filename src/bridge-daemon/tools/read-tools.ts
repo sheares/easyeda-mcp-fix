@@ -159,7 +159,7 @@ Note (upstream EDA bug, pro-api-sdk issue #33): for components placed via the AP
 		{
 			name: 'pcb_run_drc',
 			annotations: ANN.READ_ONLY,
-			description: 'Run Design Rule Check (DRC) on the PCB. Returns violations if verbose is true, or just pass/fail.',
+			description: 'Run Design Rule Check (DRC) on the PCB. Returns { passed, errors? }. Some EDA Pro builds report only a pass/fail boolean at runtime (upstream pro-api-sdk issue #27); in that case "errors" is absent and a note says per-violation detail is unavailable. Run this (with connectivity checks) before any fabrication export.',
 			inputShape: withQueryParams({
 				strict: z.boolean().default(true).describe('Whether to run strict DRC checks'),
 				ui: z.boolean().default(false).describe('Whether to show DRC results in UI'),

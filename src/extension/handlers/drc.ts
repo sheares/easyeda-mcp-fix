@@ -1,8 +1,23 @@
 export const drcHandlers: Record<string, (params: Record<string, any>) => Promise<any>> = {
 	// === DRC Check ===
 
+	// D8: normalise the same way sch.drc.check does. Upstream pro-api-sdk
+	// issue #27: despite the typed Promise<Array>, some EDA Pro builds return
+	// a bare pass/fail boolean at runtime. pcb_run_drc is the fork's primary
+	// pre-fab gate (the export tools point at it), so its output shape must
+	// be the reliable one.
 	'pcb.drc.check': async (params) => {
-		return eda.pcb_Drc.check(params.strict, params.ui, params.verbose);
+		const result: any = await eda.pcb_Drc.check(params.strict, params.ui, params.verbose);
+		if (typeof result === 'boolean') {
+			return {
+				passed: result,
+				note: 'This EDA Pro build returned only a pass/fail boolean (upstream pro-api-sdk issue #27); per-violation detail is unavailable here. Check the DRC panel in the EasyEDA UI for specifics.',
+			};
+		}
+		if (Array.isArray(result)) {
+			return { passed: result.length === 0, errors: result };
+		}
+		return result;
 	},
 
 	// === Rule Configuration ===

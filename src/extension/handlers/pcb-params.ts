@@ -71,6 +71,16 @@ export function normalizePcbParams(method: string, params: Record<string, any>):
 	return out;
 }
 
+function isPointArray(polygon: unknown): polygon is Array<{ x: number; y: number }> {
+	return (
+		Array.isArray(polygon) &&
+		polygon.length >= 2 &&
+		polygon.every(
+			(p) => p != null && typeof p === 'object' && typeof (p as any).x === 'number' && typeof (p as any).y === 'number',
+		)
+	);
+}
+
 /**
  * Convert an ergonomic [{x, y}, ...] point array to EasyEDA's polygon source
  * array format. Per the TPCB_PolygonSourceArray JSDoc, L (line) mode is
@@ -79,17 +89,31 @@ export function normalizePcbParams(method: string, params: Record<string, any>):
  * Anything else (e.g. an already-flat source array) passes through untouched.
  */
 export function toPolygonSource(polygon: unknown): unknown {
-	if (
-		Array.isArray(polygon) &&
-		polygon.length >= 2 &&
-		polygon.every(
-			(p) => p != null && typeof p === 'object' && typeof (p as any).x === 'number' && typeof (p as any).y === 'number',
-		)
-	) {
-		const points = polygon as Array<{ x: number; y: number }>;
+	if (isPointArray(polygon)) {
+		const points = polygon;
 		const source: Array<string | number> = [points[0].x, points[0].y, 'L'];
 		for (const p of points.slice(1)) source.push(p.x, p.y);
 		return source;
+	}
+	return polygon;
+}
+
+/**
+ * D9: like toPolygonSource, but for CLOSED shapes (pour, fill, region) — a
+ * point array is closed automatically (first point appended at the end when
+ * the caller has not already done so) before conversion, matching the
+ * "last point repeats the first" requirement of the raw L-mode format.
+ * Flat source arrays pass through untouched, exactly as before.
+ */
+export function toClosedPolygonSource(polygon: unknown): unknown {
+	if (isPointArray(polygon)) {
+		const points = polygon;
+		const first = points[0];
+		const last = points[points.length - 1];
+		const closed = first.x === last.x && first.y === last.y
+			? points
+			: [...points, { x: first.x, y: first.y }];
+		return toPolygonSource(closed);
 	}
 	return polygon;
 }
