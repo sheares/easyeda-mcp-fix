@@ -506,11 +506,20 @@ function startWebSocketServer(): Promise<void> {
 				requestInstanceInfo(instanceId).catch(() => { /* non-critical */ });
 			};
 
+			// D2: the extension sends exactly one auth answer per challenge, so
+			// once we have seen it there is nothing left to probe for — without
+			// this flag, a connection that never authenticates (browser build,
+			// permission off: the DEFAULT posture) would tryParseAuthAnswer —
+			// a full JSON.parse — on EVERY message forever, double-parsing
+			// multi-MB document-source responses on the daemon thread.
+			let authAnswered = false;
+
 			ws.on('message', (data) => {
 				const raw = data.toString();
-				if (!authed) {
+				if (!authed && !authAnswered) {
 					const answer = tryParseAuthAnswer(raw);
 					if (answer !== undefined) {
+						authAnswered = true;
 						if (answer.kind === 'hmac') {
 							// D1 mutual auth: verify the extension's MAC over our
 							// nonce, then prove OUR token knowledge back so the
@@ -549,9 +558,11 @@ function startWebSocketServer(): Promise<void> {
 						}
 						return;
 					}
-					// Non-auth traffic from a quarantined socket is dropped.
-					if (!registered) return;
 				}
+				// Non-auth traffic from a quarantined socket is dropped —
+				// including after a null/failed answer in require mode, where the
+				// close is still in flight.
+				if (!authed && !registered) return;
 				handleExtensionMessage(instanceId, ws, raw);
 			});
 

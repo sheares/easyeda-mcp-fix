@@ -135,8 +135,11 @@ backup.sha references the pre-edit state. Validation runs only for schematic doc
 			handler: async ({ source, instance_id, document, validate }) => {
 				const mode = validate ?? UPLOAD_VALIDATE_DEFAULT;
 
-				// Need doc-type before we can decide whether to validate. Cheap round-trip.
-				const { context } = await fetchCurrentSourceAndContext(ctx, { instance_id, document });
+				// One fetch serves both the doc-type gate and the backup below
+				// (D3): without threading it through, the full document crossed
+				// the WS three times per upload (context, backup, write).
+				const current = await fetchCurrentSourceAndContext(ctx, { instance_id, document });
+				const { context } = current;
 
 				const validation = mode === 'off'
 					? { docType: 'other' as const, skipped: { reason: 'validate=off' }, lineCount: 0, knownCount: 0, unknownTagCount: 0, invalidCount: 0, blankCount: 0, samples: { unknownTags: [], invalid: [] } }
@@ -150,7 +153,7 @@ backup.sha references the pre-edit state. Validation runs only for schematic doc
 					throw new Error(`${abort}\n\nFull validation report:\n${JSON.stringify(validation, null, 2)}`);
 				}
 
-				const backup = await backupDocument(ctx, { instance_id, document, toolName: 'document_set_source' });
+				const backup = await backupDocument(ctx, { instance_id, document, toolName: 'document_set_source', prefetched: current });
 				const result = await ctx.sendToExtension('fileManager.setDocumentSource', { source, instance_id, document }) as Record<string, unknown>;
 				return { content: [{ type: 'text', text: JSON.stringify({ ...result, backup, validation, note: formatBackupSummary(backup) }, null, 2) }] };
 			},
@@ -206,7 +209,9 @@ other types skip with a status.${WORKFLOW_HINT}`,
 				const mode = validate ?? UPLOAD_VALIDATE_DEFAULT;
 				const source = await readFile(filePath, 'utf8');
 
-				const { context } = await fetchCurrentSourceAndContext(ctx, { instance_id, document });
+				// One fetch serves both the doc-type gate and the backup (D3).
+				const current = await fetchCurrentSourceAndContext(ctx, { instance_id, document });
+				const { context } = current;
 
 				const validation = mode === 'off'
 					? { docType: 'other' as const, skipped: { reason: 'validate=off' }, lineCount: 0, knownCount: 0, unknownTagCount: 0, invalidCount: 0, blankCount: 0, samples: { unknownTags: [], invalid: [] } }
@@ -220,7 +225,7 @@ other types skip with a status.${WORKFLOW_HINT}`,
 					throw new Error(`${abort}\n\nFull validation report:\n${JSON.stringify(validation, null, 2)}`);
 				}
 
-				const backup = await backupDocument(ctx, { instance_id, document, toolName: 'document_load_from_file' });
+				const backup = await backupDocument(ctx, { instance_id, document, toolName: 'document_load_from_file', prefetched: current });
 				const result = await ctx.sendToExtension('fileManager.setDocumentSource', { source, instance_id, document }) as Record<string, unknown>;
 				return { content: [{ type: 'text', text: JSON.stringify({ ...result, loaded: filePath, size: source.length, backup, validation, note: formatBackupSummary(backup) }, null, 2) }] };
 			},

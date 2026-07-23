@@ -125,7 +125,7 @@ export function formatBackupSummary(backup: BackupResult): string {
 	return `Backed up prior state to ${backup.repo} @ ${backup.sha}${backup.changed ? '' : ' (unchanged from previous backup)'} — path: ${backup.path}`;
 }
 
-interface DocSourceResponse {
+export interface DocSourceResponse {
 	source: string;
 	context?: {
 		projectUuid?: string;
@@ -139,6 +139,14 @@ export interface DocumentBackupParams {
 	instance_id?: string;
 	document: string;
 	toolName: string;
+	/**
+	 * D3: a document source the caller already fetched in this same tool call
+	 * (e.g. document_set_source's context round-trip). When provided, the
+	 * backup skips its own getDocumentSource fetch — one less full-document
+	 * WS crossing and one less queue slot for another client's request to
+	 * interleave into between snapshot and write.
+	 */
+	prefetched?: DocSourceResponse;
 }
 
 /**
@@ -148,9 +156,10 @@ export interface DocumentBackupParams {
  */
 export async function backupDocument(
 	ctx: ToolContext,
-	{ instance_id, document, toolName }: DocumentBackupParams,
+	{ instance_id, document, toolName, prefetched }: DocumentBackupParams,
 ): Promise<BackupResult> {
-	const result = await ctx.sendToExtension('fileManager.getDocumentSource', { instance_id, document }) as DocSourceResponse;
+	const result = prefetched
+		?? await ctx.sendToExtension('fileManager.getDocumentSource', { instance_id, document }) as DocSourceResponse;
 	const docCtx = result.context || {};
 	const projectUuid = requireSafePathSegment(docCtx.projectUuid || 'unknown-project', 'projectUuid');
 	const docUuid = requireSafePathSegment(docCtx.documentUuid || document.split('@')[0], 'documentUuid');
