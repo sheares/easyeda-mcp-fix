@@ -19,6 +19,7 @@ import { fileManagerHandlers } from './handlers/file-manager';
 import { bridgeLog, describeError, setBridgeLogEmitter } from './diag';
 import { normalizePcbParams } from './handlers/pcb-params';
 import { validateAuthTokenPath } from './auth-path-validator';
+import { checkActiveDocument } from './active-document-check';
 import { createRequestQueue } from './request-queue';
 
 // Single bridge daemon owns the WebSocket port. No more scanning.
@@ -368,6 +369,37 @@ function handleMessage(extensionUuid: string, event: MessageEvent<any>): void {
 			if (isForceReleased()) {
 				bridgeLog(`H11: dropping late switchDoc success for id ${id} (${method}), slot force-released`);
 				return;
+			}
+			// Q1: openDocument can fail without throwing, leaving the previous
+			// document active. requireDocumentType below only checks the TYPE, so
+			// two PCBs in one project are interchangeable to it. Verify the switch
+			// actually landed before running the handler; a mismatch aborts rather
+			// than acting on (and backing up) the wrong document.
+			if (document) {
+				let activeInfo: unknown = null;
+				try {
+					activeInfo = await eda.dmt_SelectControl.getCurrentDocumentInfo();
+				} catch {
+					activeInfo = null; // treated as "info unavailable" (permissive)
+				}
+				if (isForceReleased()) {
+					bridgeLog(`H11: aborting after switch verification fetch for id ${id} (${method}), slot force-released`);
+					return;
+				}
+				const check = checkActiveDocument(document, (activeInfo ?? undefined) as any);
+				if (!check.ok) {
+					bridgeLog(`Q1: document switch verification failed for id ${id} (${method}): ${check.reason}`);
+					sendResponse(
+						extensionUuid,
+						id!,
+						undefined,
+						`Document switch verification failed: ${check.reason}. The editor did not land on the requested document, so the operation was aborted to avoid acting on the wrong document. Check the document UUID (see editor_get_open_tabs) and retry.`,
+					);
+					return;
+				}
+				if (check.note) {
+					bridgeLog(`Q1: ${check.note} (id ${id}, ${method})`);
+				}
 			}
 			try {
 				await requireDocumentType(method);
