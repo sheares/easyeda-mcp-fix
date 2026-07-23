@@ -1,3 +1,9 @@
+// The reference makes the EDA Pro ambient globals (eda, ESYS_NetlistType)
+// resolvable when this module is compiled OUTSIDE tsconfig.extension.json —
+// i.e. by ts-node when tests import it (tests/netlist-cache.test.ts stubs
+// those globals at runtime). The extension build already gets them via the
+// tsconfig "types" entry; this is a no-op there.
+/// <reference types="@jlceda/pro-api-types" />
 import { bridgeLog, describeError } from '../diag';
 import { parseRawNetlist, type ParsedNetlist } from './sch-netlist-parse';
 
@@ -17,7 +23,13 @@ interface NetlistCacheEntry {
 }
 
 let netlistCache: NetlistCacheEntry | null = null;
-let netlistInflight: Promise<ParsedNetlist> | null = null;
+// Q8: generation counter guards both the in-flight join and the cache write.
+// Every invalidation (schematic write) and every forced refresh bumps it; a
+// fetch that started under an older generation must neither be joined by a
+// refresh:true caller (it would hand back pre-edit data the caller explicitly
+// asked to bypass) nor write its stale result into the cache when it lands.
+let netlistGeneration = 0;
+let netlistInflight: { promise: Promise<ParsedNetlist>; generation: number } | null = null;
 
 async function currentProjectUuid(): Promise<string | null> {
 	try {
@@ -28,9 +40,12 @@ async function currentProjectUuid(): Promise<string | null> {
 	}
 }
 
-/** Drop the memoised netlist so the next fetch recomputes it. */
+/** Drop the memoised netlist so the next fetch recomputes it. Also bumps the
+ * generation so an in-flight pre-edit fetch can no longer be joined by a
+ * refresh caller or cache its (now stale) result on completion. */
 export function invalidateNetlistCache(): void {
 	netlistCache = null;
+	netlistGeneration++;
 }
 
 /**
@@ -82,27 +97,44 @@ export async function fetchParsedNetlist(forceRefresh = false): Promise<ParsedNe
 	}
 
 	// Coalesce concurrent fetches (e.g. get + getAll firing together) onto a
-	// single getNetlist round-trip.
-	if (netlistInflight) return netlistInflight;
+	// single getNetlist round-trip — but only same-generation, non-forced
+	// ones. A refresh:true caller documented as "bypass the cache and force a
+	// fresh recompute" must never be handed a fetch that started before their
+	// edit (Q8); it bumps the generation instead, which also stops the old
+	// in-flight fetch from caching its stale result when it lands.
+	if (!forceRefresh && netlistInflight && netlistInflight.generation === netlistGeneration) {
+		return netlistInflight.promise;
+	}
+	if (forceRefresh) {
+		netlistGeneration++;
+	}
+	const generation = netlistGeneration;
 
-	netlistInflight = (async () => {
+	const promise = (async () => {
 		const t0 = Date.now();
-		bridgeLog(`getNetlist: start (project=${projectUuid ?? 'unknown'}, forceRefresh=${forceRefresh})`);
+		bridgeLog(`getNetlist: start (project=${projectUuid ?? 'unknown'}, forceRefresh=${forceRefresh}, gen=${generation})`);
 		try {
 			const raw = await fetchRawNetlist();
 			const parsed = parseRawNetlist(raw);
-			netlistCache = { projectUuid, parsed, fetchedAt: Date.now() };
+			if (generation === netlistGeneration) {
+				netlistCache = { projectUuid, parsed, fetchedAt: Date.now() };
+			} else {
+				bridgeLog(`getNetlist: gen ${generation} result NOT cached (current gen ${netlistGeneration}); an edit or refresh superseded it`);
+			}
 			bridgeLog(`getNetlist: done in ${Date.now() - t0}ms (${Object.keys(parsed).length} components)`);
 			return parsed;
 		} catch (err) {
 			bridgeLog(`getNetlist: FAILED after ${Date.now() - t0}ms: ${describeError(err)}`);
 			throw err;
 		} finally {
-			netlistInflight = null;
+			if (netlistInflight?.generation === generation) {
+				netlistInflight = null;
+			}
 		}
 	})();
 
-	return netlistInflight;
+	netlistInflight = { promise, generation };
+	return promise;
 }
 
 /**
