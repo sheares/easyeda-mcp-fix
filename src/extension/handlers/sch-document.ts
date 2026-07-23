@@ -1,5 +1,12 @@
 import { fetchParsedNetlist, fetchPinNames, fetchRawNetlist, invalidateNetlistCache } from './sch-netlist-utils';
 import { forEachSchematicPage } from './sch-page-walk';
+import { mapWithConcurrency } from './concurrency';
+
+// D4: cap on concurrent getAllPinsByPrimitiveId calls during the
+// connectivity pin sweep. Unbounded, a 300-component board fired 300
+// simultaneous EDA API calls; the renderer's tolerance for that is exactly
+// the kind of thing that degrades unpredictably across builds.
+const PIN_FETCH_CONCURRENCY = 12;
 
 export const schDocumentHandlers: Record<string, (params: Record<string, any>) => Promise<any>> = {
 	'sch.document.save': async () => {
@@ -76,13 +83,13 @@ export const schDocumentHandlers: Record<string, (params: Record<string, any>) =
 		await forEachSchematicPage(async () => {
 			const pageComponents = await eda.sch_PrimitiveComponent.getAll(ESCH_PrimitiveComponentType.COMPONENT, false);
 			if (!Array.isArray(pageComponents)) return;
-			await Promise.all(
-				pageComponents.map(async (comp: any) => {
-					if (!comp?.uniqueId || !comp?.primitiveId) return;
-					uniqueToPrimitive[comp.uniqueId] = comp.primitiveId;
-					pinNamesMap[comp.uniqueId] = await fetchPinNames(comp.primitiveId);
-				}),
-			);
+			// Bounded fan-out (D4): same work as the old Promise.all, at most
+			// PIN_FETCH_CONCURRENCY pin fetches in flight.
+			await mapWithConcurrency(pageComponents, PIN_FETCH_CONCURRENCY, async (comp: any) => {
+				if (!comp?.uniqueId || !comp?.primitiveId) return;
+				uniqueToPrimitive[comp.uniqueId] = comp.primitiveId;
+				pinNamesMap[comp.uniqueId] = await fetchPinNames(comp.primitiveId);
+			});
 		});
 
 		const netlist = await netlistPromise;
