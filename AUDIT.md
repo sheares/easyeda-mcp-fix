@@ -136,7 +136,8 @@ Every C/H item re-read against current code on branch `fix/mcp-bugs-1-2-3-4`; te
 | C5 | FIXED | 592e1bb; `if (p.ws !== ws) return` |
 | C6 | FIXED | 15d9f74; all connect() failure paths reach `scheduleReconnect`; `onStartupFinished` activation |
 | C7 | FIXED | 834ac07; `transformSymbolPoint`/`transformPinAngle` + flip tests |
-| H1–H5, H7–H19, H21, H22 | FIXED | see commits 2c3b8ba, 6e2167a, 35e0753, 51303b4, 3ff01fc, 794d5bc, e028849, f09799e |
+| H1–H4, H7–H19, H21, H22 | FIXED | see commits 2c3b8ba, 6e2167a, 35e0753, 51303b4, 3ff01fc, 794d5bc, e028849, f09799e |
+| H5 | FIXED (2026-07-24) | 2026-07-23 addendum previously over-claimed FIXED: the delete-class tools got backup + wording, but `pcb_manage_layers` `set_copper_count`/`remove` (which H5 named) had neither. Q4 in QA-REPORT-2026-07-24; warnings landed in the WP4 commit of the 2026-07-24 work order |
 | H6 | FIXED (2026-07-23, e1fce38) | `PCB_COORD_NOTE` now on the six coordinate-taking read/nav tools too (`pcb_navigate_to`, `pcb_navigate_to_region`, `pcb_get_primitive_at_point`, `pcb_get_primitives_in_region`, `pcb_canvas_origin`, `pcb_convert_coordinates`) |
 | H20 | **PARTIAL** | geometry.ts skips non-finite ARC slots (no NaN poisoning); ARC slot layout still unverified, no real-ARC fixture, malformed ARCs silently excluded from overlap detection |
 

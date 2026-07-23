@@ -143,7 +143,9 @@ export function schWriteTools(ctx: ToolContext): ToolDef[] {
 		{
 			name: 'sch_modify_component',
 			annotations: ANN.WRITE_MODIFY,
-			description: 'Modify properties of a schematic component (position, rotation, designator, etc.)',
+			description: `Modify properties of a schematic component (position, rotation, designator, etc.).
+Metadata is preserved automatically (bug-1 fix, this fork only): fields you do not pass (supplierId, otherProperty, manufacturer, manufacturerId, supplier, uniqueId) are snapshotted before the write and merged back, so a position-only edit no longer wipes the BOM row. Passing an explicit value (including null) still applies it. Stock EasyEDA does NOT do this — its modify() re-serialises from the property argument alone.
+LIMITATION: the "document" parameter cannot move a component between schematic pages. Passing a different page's UUID switches the editor but the underlying call fails (undefined.getState_ComponentType); cross-page moves still require a manual UI Cut, switch page, Paste.`,
 			inputShape: withDocumentParam({
 				primitiveId: z.string().describe('The component primitive ID'),
 				x: z.number().optional().describe('New X coordinate'),

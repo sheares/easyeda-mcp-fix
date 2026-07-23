@@ -171,7 +171,7 @@ export function libTools(ctx: ToolContext): ToolDef[] {
 		{
 			name: 'lib_symbol_update_document_source',
 			annotations: ANN.DESTRUCTIVE,
-			description: 'Replace a library symbol\'s entire .esym source. The symbol must live in a library you can write to (personal/team/project). Returns boolean success.',
+			description: 'Replace a library symbol\'s entire .esym source. IRREVERSIBLE: no undo, and no backup snapshot is taken (library assets are not documents). Fetch and save the current source with lib_symbol_get first if you may need to restore it. The symbol must live in a library you can write to (personal/team/project). Returns boolean success.',
 			inputShape: withInstanceParam({
 				symbolUuid: z.string().describe('Symbol UUID'),
 				libraryUuid: z.string().describe('Library UUID containing the symbol'),

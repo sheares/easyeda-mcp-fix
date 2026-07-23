@@ -62,6 +62,12 @@ export function manufactureTools(ctx: ToolContext): ToolDef[] {
 			annotations: ANN.READ_ONLY,
 			description: `Export the PCB design in various formats. Returns { fileName, data (Base64), size }.
 
+BEFORE generating any fabrication output (gerber, odbplus, drill, pick_and_place): run pcb_run_drc
+(and sch_run_drc) and resolve all violations. Clearance DRC alone is not sufficient — this fork
+exists partly because API-drawn tracks passed clearance DRC while being electrically dead to their
+SMD pads; only a No-Connection/connectivity check surfaced it. Include connectivity checks in the
+DRC run before shipping.
+
 Formats: dsn (for FreeRouting), gerber (manufacturing), bom (bill of materials), pick_and_place (assembly),
 3d (STEP/OBJ), pdf, netlist, dxf, altium, pads, odbplus (ODB++ archive with stackup+nets),
 ipc_d_356 (netlist test format), flying_probe, test_point, autoroute_json, autolayout_json.
@@ -96,6 +102,10 @@ ${OPTIONS_HINT}`,
 			description: `Export the PCB design in various formats directly to a local file path — preferred
 over pcb_export when the output is large (gerber/odbplus zips, 3d STEP, pdf), since it avoids
 shipping the bytes back through the MCP response as Base64.
+
+BEFORE generating any fabrication output: run pcb_run_drc (and sch_run_drc) and resolve all
+violations. Clearance DRC alone is not sufficient — include connectivity/No-Connection checks;
+see pcb_export for why.
 
 Returns { saved: path, size, originalName, format }.
 

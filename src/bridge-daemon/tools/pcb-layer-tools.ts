@@ -28,10 +28,10 @@ export function pcbLayerTools(ctx: ToolContext): ToolDef[] {
 - set_invisible: hide layer(s) (layer optional; setOtherLayerVisible optional)
 - lock: lock layer(s) (layer optional)
 - unlock: unlock layer(s) (layer optional)
-- set_copper_count: set copper layers (count: 2,4,6,...,32)
+- set_copper_count: set copper layers (count: 2,4,6,...,32). WARNING: REDUCING the count permanently discards all copper (tracks, pours, vias' inner connections) on the removed inner layers. No undo, and no backup snapshot is taken. Export the board first (pcb_export_to_file or document_save_to_file) if the layers being removed hold routing.
 - modify: modify layer properties (layer: string, property: {name?, type?, color?, transparency?})
 - add_custom: add a new custom layer
-- remove: remove a custom layer (layer: string)`,
+- remove: remove a custom layer (layer: string). WARNING: deletes the layer AND everything drawn on it. No undo, no backup snapshot. Export first if in doubt.`,
 			inputShape: withDocumentParam({
 				action: z
 					.enum([
