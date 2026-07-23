@@ -1,6 +1,6 @@
 import type { ToolDef, ToolContext } from '../types';
 import { z } from 'zod';
-import { withDocumentParam, withQueryParams } from './query-params';
+import { withDocumentParam, withQueryParams, PCB_COORD_NOTE } from './query-params';
 
 export function analysisTools(ctx: ToolContext): ToolDef[] {
 	return [
@@ -40,7 +40,7 @@ export function analysisTools(ctx: ToolContext): ToolDef[] {
 
 		{
 			name: 'pcb_navigate_to',
-			description: 'Navigate the PCB editor viewport to specific coordinates',
+			description: `Navigate the PCB editor viewport to specific coordinates. ${PCB_COORD_NOTE}`,
 			inputShape: withDocumentParam({
 				x: z.number().describe('X coordinate to navigate to'),
 				y: z.number().describe('Y coordinate to navigate to'),
@@ -53,7 +53,7 @@ export function analysisTools(ctx: ToolContext): ToolDef[] {
 
 		{
 			name: 'pcb_navigate_to_region',
-			description: 'Navigate and zoom the PCB editor viewport to fit a specific region',
+			description: `Navigate and zoom the PCB editor viewport to fit a specific region. ${PCB_COORD_NOTE}`,
 			inputShape: withDocumentParam({
 				left: z.number().describe('Left boundary X'),
 				right: z.number().describe('Right boundary X'),
@@ -78,7 +78,7 @@ export function analysisTools(ctx: ToolContext): ToolDef[] {
 
 		{
 			name: 'pcb_get_primitive_at_point',
-			description: 'Get the primitive at a specific point on the PCB',
+			description: `Get the primitive at a specific point on the PCB. ${PCB_COORD_NOTE}`,
 			inputShape: withDocumentParam({
 				x: z.number().describe('X coordinate'),
 				y: z.number().describe('Y coordinate'),
@@ -91,7 +91,7 @@ export function analysisTools(ctx: ToolContext): ToolDef[] {
 
 		{
 			name: 'pcb_get_primitives_in_region',
-			description: 'Get all primitives within a rectangular region on the PCB',
+			description: `Get all primitives within a rectangular region on the PCB. ${PCB_COORD_NOTE}`,
 			inputShape: withQueryParams({
 				left: z.number().describe('Left boundary X'),
 				right: z.number().describe('Right boundary X'),
@@ -110,7 +110,7 @@ export function analysisTools(ctx: ToolContext): ToolDef[] {
 
 		{
 			name: 'pcb_canvas_origin',
-			description: 'Get or set the canvas origin offset relative to data origin',
+			description: `Get or set the canvas origin offset relative to data origin. ${PCB_COORD_NOTE}`,
 			inputShape: withDocumentParam({
 				action: z.enum(['get', 'set']).describe('"get" to read, "set" to write'),
 				offsetX: z.number().optional().describe('X offset (required for set)'),
@@ -128,7 +128,7 @@ export function analysisTools(ctx: ToolContext): ToolDef[] {
 
 		{
 			name: 'pcb_convert_coordinates',
-			description: 'Convert between canvas coordinates and data coordinates',
+			description: `Convert between canvas coordinates and data coordinates. ${PCB_COORD_NOTE}`,
 			inputShape: withDocumentParam({
 				direction: z.enum(['canvasToData', 'dataToCanvas']).describe('Conversion direction'),
 				x: z.number().describe('X coordinate'),

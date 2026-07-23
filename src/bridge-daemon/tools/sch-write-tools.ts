@@ -163,6 +163,7 @@ export function schWriteTools(ctx: ToolContext): ToolDef[] {
 		{
 			name: 'sch_swap_supplier_part',
 			description: `Bulk-swap supplier metadata on schematic components matching a filter.
+WARNING (field-confirmed): this swaps supplier METADATA only. The canvas symbol and its label stay those of the OLD part. Use this ONLY when the replacement is a true drop-in with identical schematic symbol and PCB footprint (e.g. same 100nF 0603 cap in a different reel). For any part with a different symbol, footprint, or pin count, delete the component and re-add it instead — otherwise the schematic and BOM will disagree with the canvas symbol/label.
 Uses the same bug-1 metadata guard as sch_modify_component: unspecified fields (otherProperty, uniqueId, position, symbol, etc.) are preserved via a snapshot-and-merge round trip, so a swap that only touches supplierId doesn't wipe the rest of the BOM row.
 Typical uses: rotate to a cheaper LCSC alt (match: {supplierId: "C25804"}, replace: {supplierId: "C17414", manufacturerId: "..."}), or bulk-tag a designator prefix (match: {designator: "R*"}, replace: {manufacturer: "YAGEO"}).
 match: filter fields with the same semantics as read-tool filter — exact string, ["a","b"] OR-array, or "prefix*" glob. Any component field is accepted (designator, supplierId, manufacturerId, manufacturer, ...).
