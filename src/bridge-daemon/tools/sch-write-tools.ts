@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import type { ToolDef, ToolContext } from '../types';
 import { withDocumentParam } from './query-params';
-import { backupDocument, formatBackupSummary } from '../backup';
+import { backupDocument, backupProject, formatBackupSummary, resolveProjectUuid, type BackupResult } from '../backup';
 
 export function schWriteTools(ctx: ToolContext): ToolDef[] {
 	return [
@@ -165,12 +165,13 @@ export function schWriteTools(ctx: ToolContext): ToolDef[] {
 			description: `Bulk-swap supplier metadata on schematic components matching a filter.
 WARNING (field-confirmed): this swaps supplier METADATA only. The canvas symbol and its label stay those of the OLD part. Use this ONLY when the replacement is a true drop-in with identical schematic symbol and PCB footprint (e.g. same 100nF 0603 cap in a different reel). For any part with a different symbol, footprint, or pin count, delete the component and re-add it instead — otherwise the schematic and BOM will disagree with the canvas symbol/label.
 Uses the same bug-1 metadata guard as sch_modify_component: unspecified fields (otherProperty, uniqueId, position, symbol, etc.) are preserved via a snapshot-and-merge round trip, so a swap that only touches supplierId doesn't wipe the rest of the BOM row.
+Non-dry-run swaps snapshot first: the active document (or, with allSchematicPages, the whole project) is committed to the local backup repo before any write, and the response includes the backup SHA. Note the multi-page walk is not atomic — if a page fails to open mid-walk the swap aborts with earlier pages already written; use the backup SHA to recover.
 Typical uses: rotate to a cheaper LCSC alt (match: {supplierId: "C25804"}, replace: {supplierId: "C17414", manufacturerId: "..."}), or bulk-tag a designator prefix (match: {designator: "R*"}, replace: {manufacturer: "YAGEO"}).
 match: filter fields with the same semantics as read-tool filter — exact string, ["a","b"] OR-array, or "prefix*" glob. Any component field is accepted (designator, supplierId, manufacturerId, manufacturer, ...).
 replace: at least one of supplierId, manufacturerId, manufacturer, supplier.
-dryRun: if true, returns the matches with before/after but does NOT modify. Recommended for the first pass.
+dryRun: if true, returns the matches with before/after but does NOT modify (and takes no backup). Recommended for the first pass.
 allSchematicPages: walk every schematic page instead of only the active one; original page is restored.
-Returns { dryRun, swappedCount, swapped:[{primitiveId, designator, page, before, after}] }. Always re-run sch_export_bom afterward to confirm BOM integrity.`,
+Returns { dryRun, swappedCount, swapped:[{primitiveId, designator, page, before, after}], backup? }. Always re-run sch_export_bom afterward to confirm BOM integrity.`,
 			inputShape: withDocumentParam({
 				match: z
 					.record(z.string(), z.union([z.string(), z.number(), z.boolean(), z.array(z.string())]))
@@ -187,8 +188,37 @@ Returns { dryRun, swappedCount, swapped:[{primitiveId, designator, page, before,
 				dryRun: z.boolean().optional().describe('If true, return matches with before/after but do not modify. Recommended for first pass.'),
 			}),
 			handler: async (params) => {
-				const result = await ctx.sendToExtension('sch.component.swapSupplierPart', params);
-				return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
+				// Q2: this is a bulk mutation — snapshot before writing, like every
+				// other document-destructive tool. dryRun takes no backup.
+				let backup: BackupResult | undefined;
+				if (params.dryRun !== true) {
+					if (params.allSchematicPages === true) {
+						// Multi-page swaps can touch every schematic page; a single-
+						// document snapshot does not cover the blast radius, so back
+						// up the whole project. Fall back to the active document when
+						// the project uuid cannot be resolved (desktop-local project).
+						const projectUuid = await resolveProjectUuid(ctx, {
+							instance_id: params.instance_id,
+							document: params.document,
+						});
+						backup = projectUuid !== undefined
+							? await backupProject(ctx, { instance_id: params.instance_id, projectUuid, toolName: 'sch_swap_supplier_part' })
+							: await backupDocument(ctx, { instance_id: params.instance_id, document: params.document, toolName: 'sch_swap_supplier_part' });
+					} else {
+						backup = await backupDocument(ctx, {
+							instance_id: params.instance_id,
+							document: params.document,
+							toolName: 'sch_swap_supplier_part',
+						});
+					}
+				}
+				const result = await ctx.sendToExtension('sch.component.swapSupplierPart', params) as Record<string, unknown>;
+				const payload: Record<string, unknown> = { ...result };
+				if (backup) {
+					payload.backup = backup;
+					payload.note = formatBackupSummary(backup);
+				}
+				return { content: [{ type: 'text', text: JSON.stringify(payload, null, 2) }] };
 			},
 		},
 

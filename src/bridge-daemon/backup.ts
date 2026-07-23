@@ -175,6 +175,22 @@ export async function backupDocument(
 	return { sha, path: subpath, absolutePath: absPath, repo, changed: sha !== shaBefore };
 }
 
+/**
+ * Resolve the project UUID owning the given document, via the same
+ * getDocumentSource context fetch backupDocument uses. Returns undefined
+ * when the extension reports no project context (e.g. desktop-local project
+ * without a uuid) — callers should fall back to a document-level backup in
+ * that case rather than skipping backup entirely.
+ */
+export async function resolveProjectUuid(
+	ctx: ToolContext,
+	{ instance_id, document }: { instance_id?: string; document: string },
+): Promise<string | undefined> {
+	const result = await ctx.sendToExtension('fileManager.getDocumentSource', { instance_id, document }) as DocSourceResponse;
+	const uuid = result?.context?.projectUuid;
+	return typeof uuid === 'string' && uuid.length > 0 ? uuid : undefined;
+}
+
 interface ProjectFileResponse {
 	fileName: string;
 	data: string;
