@@ -2,6 +2,8 @@
 
 Full-codebase review across the three layers (MCP server, bridge daemon, EDA Pro extension) plus lib, tests and packaging. Verified on this machine: `npm run typecheck` clean on both configs, `npm test` 48/48 pass.
 
+> **Re-verification 2026-07-23 (v1.4.0, 107/107 tests): 26 FIXED / 3 PARTIAL (C4, H6, H20) / 0 OPEN.** See the addendum at the end of this file for per-item evidence and four NEW risks this audit missed.
+
 Severity: **C** = fix before relying on it, **H** = important, **N** = nice-to-have.
 
 ---
@@ -118,3 +120,33 @@ Severity: **C** = fix before relying on it, **H** = important, **N** = nice-to-h
 ## What is already good
 
 Daemon lifecycle design (singleton UDS bind with probe-and-unlink, dev:ino self-termination, spawn race safety), NDJSON framing on both ends, instanceId validation against log injection, zip-entry traversal guards, commit-message sanitisation, `bridge_restart`'s multi-session warning, context-budget params (`fields`/`filter`/`limit`), and the lib's byte-preserving round-trip architecture. Typecheck is clean and all 48 tests pass.
+
+---
+
+## Addendum: re-verification against v1.4.0 (2026-07-23)
+
+Every C/H item re-read against current code on branch `fix/mcp-bugs-1-2-3-4`; tests 107/107 pass.
+
+| Item | Status | Evidence |
+|---|---|---|
+| C1 | FIXED | 592e1bb; close handler `extensions.get(instanceId)?.ws === ws`, pendings keyed by `p.ws` |
+| C2 | FIXED | a94ced8; `backup.ts:requireSafePathSegment` on both UUIDs |
+| C3 | FIXED | 2c3b8ba; `protocol.ts:callToolTimeoutMs()` = 3×extension timeout + 30 s, single source |
+| C4 | **PARTIAL** | efc391a + 6e2167a; challenge-response token, 0700/0600 perms. Default policy still registers sockets that never answer the challenge; Origin-spoof path remains unless `EDA_WS_AUTH=require` |
+| C5 | FIXED | 592e1bb; `if (p.ws !== ws) return` |
+| C6 | FIXED | 15d9f74; all connect() failure paths reach `scheduleReconnect`; `onStartupFinished` activation |
+| C7 | FIXED | 834ac07; `transformSymbolPoint`/`transformPinAngle` + flip tests |
+| H1–H5, H7–H19, H21, H22 | FIXED | see commits 2c3b8ba, 6e2167a, 35e0753, 51303b4, 3ff01fc, 794d5bc, e028849, f09799e |
+| H6 | FIXED (2026-07-23, e1fce38) | `PCB_COORD_NOTE` now on the six coordinate-taking read/nav tools too (`pcb_navigate_to`, `pcb_navigate_to_region`, `pcb_get_primitive_at_point`, `pcb_get_primitives_in_region`, `pcb_canvas_origin`, `pcb_convert_coordinates`) |
+| H20 | **PARTIAL** | geometry.ts skips non-finite ARC slots (no NaN poisoning); ARC slot layout still unverified, no real-ARC fixture, malformed ARCs silently excluded from overlap detection |
+
+Nice-to-haves independently fixed: `updateInstanceInfo` merges only defined fields; `list_instances` staleness; `sch_select_primitives` routes to working `crossProbe`. The rest of the N-list stands.
+
+### New risks this audit missed
+
+1. **`auth.challenge` tokenPath is an arbitrary-file-read primitive** (`ws-client.ts:answerAuthChallenge`): the extension reads whatever path the server sends and returns its contents. Any local process that binds 16168 (easy — daemon idle-exits shortly after the last MCP client, extension retries every 15 s) can exfiltrate any user-readable file. **Fix: pin the expected `~/.easyeda-mcp/ws-token` path client-side.** **FIXED 2026-07-23 (3242ba6)**: new pure module `src/extension/auth-path-validator.ts` refuses any path that isn't shaped like `.../.easyeda-mcp/ws-token` (rejects `..`, NUL, wrong basename, wrong parent dir). `answerAuthChallenge` validates before `readFileFromFileSystem`. 12 unit tests cover POSIX/Windows shape and classic exfil targets.
+2. **Buffered-response id collision across daemon restarts**: `extRequestIdCounter` resets each daemon run ("d1", "d2"…); a flushed stale response for old "d5" arriving on the new socket can be accepted as the answer to the new daemon's unrelated "d5" (the `p.ws === ws` check passes post-reconnect). Fix: include a per-run nonce in request ids. **FIXED 2026-07-23 (45dda57)**: new `src/bridge-daemon/request-id.ts` factories the generator with a 24-bit hex per-run nonce; ids now `d<nonce>-<counter>` so different runs live in disjoint id spaces. 3 unit tests including a disjoint-space cross-check.
+3. **H11 queue force-release (120 s)** lets a wedged handler later complete against a different request's active document — the serialisation guarantee lapses exactly in the hang cases it was built for. Fix: cancel (ignore result of) the wedged handler on force-release rather than letting it land. **FIXED 2026-07-23 (9fc512d)**: `enqueueRequest` task signature now receives `isForceReleased()`; the pipeline in `handleMessage` checks it after every await and abandons silently on true (no `sendResponse`, no further eda calls). Queue extracted to `src/extension/request-queue.ts` for isolation testing (5 tests).
+4. **`sch_swap_supplier_part` leaves a stale symbol/label** when the replacement part's symbol/footprint differ (field-confirmed). Constrain use to true drop-ins, or document delete-and-re-add as the required path; consider a warning in the tool description. **FIXED 2026-07-23 (e1fce38)**: tool description now leads with an explicit warning that it swaps supplier metadata only and requires a true drop-in (identical symbol + footprint); otherwise delete and re-add.
+
+**Post-addendum state (2026-07-23, v1.5.0)**: **28 FIXED / 2 PARTIAL (C4, H20) / 0 OPEN**, plus all four new-risk items above are FIXED. C4 remains PARTIAL only in the "default policy accepts non-answering sockets" sense; the new WP1 fix closes the arbitrary-file-read primitive that made it dangerous.
