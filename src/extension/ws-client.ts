@@ -19,6 +19,7 @@ import { fileManagerHandlers } from './handlers/file-manager';
 import { bridgeLog, describeError, setBridgeLogEmitter } from './diag';
 import { normalizePcbParams } from './handlers/pcb-params';
 import { validateAuthTokenPath } from './auth-path-validator';
+import { createRequestQueue } from './request-queue';
 
 // Single bridge daemon owns the WebSocket port. No more scanning.
 // 16168 is one above the legacy 15168-15207 scan range — chosen so the
@@ -250,32 +251,26 @@ async function requireDocumentType(method: string): Promise<void> {
 // after QUEUE_SLOT_TIMEOUT_MS even if the task never settles (some EDA calls
 // hang forever, e.g. getPdfFile in the web app) so one wedged call cannot
 // block the tab permanently; the daemon times the request out on its side
-// well before that (45s default).
+// well before that (45s default). After force-release, the task's own
+// isForceReleased() flag lets the pipeline abandon further eda.* calls and
+// the response send, so a late completion cannot mutate an unrelated
+// document or spoof an answer for a request the daemon has already timed
+// out. See request-queue.ts.
 // ---------------------------------------------------------------------------
 const QUEUE_KEY = '__claude_mcp_request_queue__';
 const QUEUE_SLOT_TIMEOUT_MS = 120_000;
 
-function enqueueRequest(task: () => Promise<void>): void {
-	const g = globalThis as any;
-	const tail: Promise<void> = g[QUEUE_KEY] ?? Promise.resolve();
-	g[QUEUE_KEY] = tail.then(() => {
-		let release!: () => void;
-		const slot = new Promise<void>((resolve) => {
-			release = resolve;
-		});
-		const timer = setTimeout(release, QUEUE_SLOT_TIMEOUT_MS);
-		task().then(
-			() => {
-				clearTimeout(timer);
-				release();
-			},
-			() => {
-				clearTimeout(timer);
-				release();
-			},
-		);
-		return slot;
-	});
+const requestQueue = createRequestQueue({
+	slotTimeoutMs: QUEUE_SLOT_TIMEOUT_MS,
+	getTail: () => (globalThis as any)[QUEUE_KEY] ?? Promise.resolve(),
+	setTail: (t) => {
+		(globalThis as any)[QUEUE_KEY] = t;
+	},
+	onForceRelease: () => bridgeLog(`H11 queue slot force-released after ${QUEUE_SLOT_TIMEOUT_MS}ms; any late completion will be dropped`),
+});
+
+function enqueueRequest(task: (isForceReleased: () => boolean) => Promise<void>): void {
+	requestQueue.enqueue(task);
 }
 
 async function switchToDocument(document: string): Promise<unknown> {
@@ -350,21 +345,47 @@ function handleMessage(extensionUuid: string, event: MessageEvent<any>): void {
 
 		// Auto-switch document if specified, then validate doc type, then run
 		// handler — the whole pipeline deferred until the queue reaches this
-		// request (H11).
-		enqueueRequest(async () => {
+		// request (H11). After each await we check isForceReleased: if our
+		// 120s slot has been force-released (assumed-wedged), abandon any
+		// further side effects. The daemon has already timed the request out
+		// on its side (45s default) so the client saw a timeout error; a late
+		// sendResponse here would spoof an answer to an unrelated request and
+		// a late eda.* mutation would land on whichever document is now
+		// active, not the one this task was invoked against.
+		enqueueRequest(async (isForceReleased) => {
 			try {
 				if (document) {
 					await switchToDocument(document);
 				}
 			} catch (err: any) {
+				if (isForceReleased()) {
+					bridgeLog(`H11: dropping late switchDoc failure for id ${id} (${method}), slot force-released`);
+					return;
+				}
 				sendResponse(extensionUuid, id!, undefined, `Failed to switch to document "${document}": ${describeError(err)}`);
+				return;
+			}
+			if (isForceReleased()) {
+				bridgeLog(`H11: dropping late switchDoc success for id ${id} (${method}), slot force-released`);
 				return;
 			}
 			try {
 				await requireDocumentType(method);
+				if (isForceReleased()) {
+					bridgeLog(`H11: aborting before handler for id ${id} (${method}), slot force-released`);
+					return;
+				}
 				const result = await handler(normalizedParams);
+				if (isForceReleased()) {
+					bridgeLog(`H11: dropping late handler result for id ${id} (${method}), slot force-released`);
+					return;
+				}
 				sendResponse(extensionUuid, id!, applyQueryParams(result, qp));
 			} catch (err: any) {
+				if (isForceReleased()) {
+					bridgeLog(`H11: dropping late handler error for id ${id} (${method}): ${describeError(err)}`);
+					return;
+				}
 				sendResponse(extensionUuid, id!, undefined, describeError(err));
 			}
 		});
