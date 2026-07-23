@@ -176,7 +176,7 @@ WARNING (field-confirmed): this swaps supplier METADATA only. The canvas symbol 
 Uses the same bug-1 metadata guard as sch_modify_component: unspecified fields (otherProperty, uniqueId, position, symbol, etc.) are preserved via a snapshot-and-merge round trip, so a swap that only touches supplierId doesn't wipe the rest of the BOM row.
 Non-dry-run swaps snapshot first: the active document (or, with allSchematicPages, the whole project) is committed to the local backup repo before any write, and the response includes the backup SHA. Note the multi-page walk is not atomic — if a page fails to open mid-walk the swap aborts with earlier pages already written; use the backup SHA to recover.
 Typical uses: rotate to a cheaper LCSC alt (match: {supplierId: "C25804"}, replace: {supplierId: "C17414", manufacturerId: "..."}), or bulk-tag a designator prefix (match: {designator: "R*"}, replace: {manufacturer: "YAGEO"}).
-match: filter fields with the same semantics as read-tool filter — exact string, ["a","b"] OR-array, or "prefix*" glob. Any component field is accepted (designator, supplierId, manufacturerId, manufacturer, ...).
+match: filter fields with the same semantics as read-tool filter — exact string, ["a","b"] OR-array, or "prefix*" glob. Any component field is accepted (designator, supplierId, manufacturerId, manufacturer, ...). Matching runs against RESOLVED values: fields stored as ={...} template expressions are resolved from the netlist before the filter applies, matching what sch_get_all_components shows. If the netlist cannot be fetched, matching falls back to raw stored values.
 replace: at least one of supplierId, manufacturerId, manufacturer, supplier.
 dryRun: if true, returns the matches with before/after but does NOT modify (and takes no backup). Recommended for the first pass.
 allSchematicPages: walk every schematic page instead of only the active one; original page is restored.
@@ -195,6 +195,7 @@ Returns { dryRun, swappedCount, swapped:[{primitiveId, designator, page, before,
 					.describe('Supplier metadata to overwrite on matched components. At least one field required.'),
 				allSchematicPages: z.boolean().optional().describe('Walk all schematic pages (defaults to active page only)'),
 				dryRun: z.boolean().optional().describe('If true, return matches with before/after but do not modify. Recommended for first pass.'),
+				refresh: z.boolean().optional().describe('If true, bypass the netlist cache when resolving ={...} templates for matching. Use after editing the schematic directly in the EasyEDA UI.'),
 			}),
 			handler: async (params) => {
 				// Q2: this is a bulk mutation — snapshot before writing, like every

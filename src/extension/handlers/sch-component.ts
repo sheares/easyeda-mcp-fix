@@ -1,5 +1,6 @@
 import { fetchParsedNetlist, invalidateNetlistCache, resolveTemplateExpressions } from './sch-netlist-utils';
 import type { ParsedNetlist } from './sch-netlist-parse';
+import { bridgeLog, describeError } from '../diag';
 import { preserveMetadataOnModify, BASE_METADATA_PRESERVE_FIELDS } from './preserve-metadata';
 import { forEachSchematicPage } from './sch-page-walk';
 import { matchesFilter, type MatchFilter } from './component-match';
@@ -171,6 +172,21 @@ export const schComponentHandlers: Record<string, (params: Record<string, any>) 
 		const dryRun = params.dryRun === true;
 		const swapped: any[] = [];
 
+		// Q9: match against RESOLVED values. EasyEDA stores fields like
+		// manufacturerId as ={...} template expressions pointing at netlist
+		// properties; matching the raw stored value made
+		// match: {manufacturerId: "MP1584EN"} silently miss every templated
+		// component (dryRun reported 0 rather than an error). Fetch the parsed
+		// netlist once (cached 60s) and resolve on a COPY per component. If
+		// the netlist is unavailable, fall back to raw-value matching rather
+		// than failing the whole swap.
+		let netlist: ParsedNetlist = {};
+		try {
+			netlist = await fetchParsedNetlist(params.refresh === true);
+		} catch (err) {
+			bridgeLog(`swapSupplierPart: netlist unavailable, matching against raw stored values: ${describeError(err)}`);
+		}
+
 		const captureBefore = (c: any) => ({
 			supplierId: c?.supplierId ?? null,
 			manufacturerId: c?.manufacturerId ?? null,
@@ -182,7 +198,13 @@ export const schComponentHandlers: Record<string, (params: Record<string, any>) 
 			const raw = await eda.sch_PrimitiveComponent.getAll(undefined, false);
 			const comps: any[] = Array.isArray(raw) ? raw : [];
 			for (const c of comps) {
-				if (!matchesFilter(c, match)) continue;
+				// Resolve templates on a shallow COPY only. The write below must
+				// carry the RAW stored values (preserveMetadataOnModify snapshots
+				// them), or a swap would bake resolved literals into components
+				// that intentionally template their fields.
+				const view = { ...c };
+				resolveComponentTemplates(view, netlist);
+				if (!matchesFilter(view, match)) continue;
 				const before = captureBefore(c);
 				const after = { ...before, ...replace };
 				const entry: any = {
