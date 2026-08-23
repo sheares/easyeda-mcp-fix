@@ -11,6 +11,8 @@ import type { CallToolResult } from './protocol';
 export interface InstanceInfo {
 	instanceId: string;
 	connectedAt: number;
+	/** Version of the .eext that is actually running (from its extension.json); absent on pre-1.6.1 extensions. */
+	extensionVersion?: string;
 	projectName?: string;
 	currentDocument?: string;
 	documentType?: string;
@@ -75,6 +77,9 @@ export interface ToolContext {
 
 	/** Active extension WS port (advertised by server_info). */
 	getPort(): number;
+
+	/** This daemon's build version (injected from package.json at build time; '0.0.0-dev' under ts-node). */
+	getDaemonVersion(): string;
 
 	/** Force a fresh poll of every extension's instance.getInfo. */
 	refreshAllInstanceInfo(): Promise<void>;

@@ -34,9 +34,26 @@ export function bridgeLog(message: string): void {
  * which the naive `err.message ?? String(err)` collapses to "undefined" and
  * hides the real cause.
  */
+/**
+ * An error whose message is the whole story: a deliberate, user-facing
+ * refusal (wrong document type, unverified daemon) rather than an unexpected
+ * failure. describeError returns just the message for these, so the MCP
+ * client is not handed a renderer stack trace and an internal api.js URL.
+ */
+export class BridgeUserError extends Error {
+	readonly userFacing = true;
+	constructor(message: string) {
+		super(message);
+		this.name = 'BridgeUserError';
+	}
+}
+
 export function describeError(err: unknown): string {
 	if (err === undefined) return '<rejected with undefined>';
 	if (err === null) return '<rejected with null>';
+	if (err instanceof Error && (err as any).userFacing === true) {
+		return err.message;
+	}
 	if (err instanceof Error) {
 		return err.stack || `${err.name}: ${err.message}`;
 	}

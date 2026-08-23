@@ -21,6 +21,7 @@ function stubCtx(response: unknown): { ctx: ToolContext; calls: Array<{ method: 
 		getConnectedCount: () => 1,
 		isConnected: () => true,
 		getPort: () => 16168,
+		getDaemonVersion: () => '0.0.0-test',
 		refreshAllInstanceInfo: async () => {},
 		requestRestart: () => {},
 	} as ToolContext;

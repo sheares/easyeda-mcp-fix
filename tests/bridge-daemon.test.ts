@@ -625,12 +625,30 @@ test('WS auth: hmac-v1 mutual handshake verifies both directions (EDA_WS_AUTH=re
 		const mac = createHmac('sha256', token)
 			.update(extMacMessage(challenge.serverNonce, clientNonce))
 			.digest('hex');
-		ws.send(JSON.stringify({ type: 'auth', data: { scheme: 'hmac-v1', clientNonce, mac } }));
 
-		// Registration (hello) proves the daemon accepted the ext MAC.
-		await nextMessage(ws, (m) => m.type === 'hello');
-		// auth.ok proves the daemon's half; verify it against the same token.
-		const ok = await nextMessage(ws, (m) => m.type === 'auth.ok');
+		// Since 1.6.1 the daemon's auth.ok must PRECEDE registration (hello +
+		// instance.getInfo): the extension holds every request until it has
+		// checked auth.ok, so the proof has to be on the wire first. Capture
+		// both in arrival order from a single listener.
+		const order: string[] = [];
+		const gotBoth = new Promise<{ ok: any }>((resolve, reject) => {
+			let ok: any;
+			const timer = setTimeout(() => reject(new Error('auth.ok/hello timeout')), 5000);
+			ws.on('message', (data) => {
+				try {
+					const m = JSON.parse(data.toString());
+					if (m.type === 'auth.ok' || m.type === 'hello') order.push(m.type);
+					if (m.type === 'auth.ok') ok = m;
+					if (order.includes('auth.ok') && order.includes('hello')) {
+						clearTimeout(timer);
+						resolve({ ok });
+					}
+				} catch { /* ignore */ }
+			});
+		});
+		ws.send(JSON.stringify({ type: 'auth', data: { scheme: 'hmac-v1', clientNonce, mac } }));
+		const { ok } = await gotBoth;
+		assert.deepEqual(order, ['auth.ok', 'hello'], 'auth.ok must precede registration');
 		const expectedDaemonMac = createHmac('sha256', token)
 			.update(daemonMacMessage(clientNonce, challenge.serverNonce))
 			.digest('hex');

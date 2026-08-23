@@ -45,6 +45,7 @@ const bridgeDaemonConfig: esbuild.BuildOptions = {
 	format: 'cjs',
 	treeShaking: true,
 	external: [],
+	define: versionDefine,
 };
 
 (async () => {

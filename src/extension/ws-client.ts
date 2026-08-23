@@ -16,12 +16,14 @@ import { layerHandlers } from './handlers/layer';
 import { pcbPrimitiveHandlers } from './handlers/pcb-primitive';
 import { editorHandlers } from './handlers/editor';
 import { fileManagerHandlers } from './handlers/file-manager';
-import { bridgeLog, describeError, setBridgeLogEmitter } from './diag';
+import { BridgeUserError, bridgeLog, describeError, setBridgeLogEmitter } from './diag';
 import { normalizePcbParams } from './handlers/pcb-params';
 import { validateAuthTokenPath } from './auth-path-validator';
 import { checkActiveDocument } from './active-document-check';
 import { buildExtensionAuthAnswer, daemonMacMessage, hmacSha256Hex } from '../bridge-daemon/auth-mac';
 import { createRequestQueue } from './request-queue';
+import { allowsRequests, createVerificationGate, type VerificationGate } from './daemon-verification';
+import * as extensionConfig from '../../extension.json';
 
 // Single bridge daemon owns the WebSocket port. No more scanning.
 // 16168 is one above the legacy 15168-15207 scan range — chosen so the
@@ -202,6 +204,10 @@ async function getInstanceInfo(): Promise<Record<string, any>> {
 
 		return {
 			instanceId,
+			// QA 2026-08-23 Major 1: let the daemon (and server_info) see which
+			// .eext build is actually running, so three-layer version drift is
+			// visible instead of guessed at.
+			extensionVersion: extensionConfig.version,
 			// Prefer friendlyName (user-visible display name) over name (a URL
 			// slug populated by the web backend but absent on desktop-local
 			// projects). Both fields are declared on IDMT_ProjectItem in
@@ -212,7 +218,7 @@ async function getInstanceInfo(): Promise<Record<string, any>> {
 			documents,
 		};
 	} catch {
-		return { instanceId };
+		return { instanceId, extensionVersion: extensionConfig.version };
 	}
 }
 
@@ -230,7 +236,7 @@ async function requireDocumentType(method: string): Promise<void> {
 	if (requiresPcb && docType !== 3) {
 		const current =
 			docType === 1 ? ' (a schematic is currently open)' : docType != null ? '' : ' (no document is open)';
-		throw new Error(
+		throw new BridgeUserError(
 			`This tool requires a PCB document, but the currently active tab is not a PCB${current}. Pass a PCB document UUID as the "document" parameter, or use editor_open_document to switch.`,
 		);
 	}
@@ -238,7 +244,7 @@ async function requireDocumentType(method: string): Promise<void> {
 	if (requiresSch && docType !== 1) {
 		const current =
 			docType === 3 ? ' (a PCB is currently open)' : docType != null ? '' : ' (no document is open)';
-		throw new Error(
+		throw new BridgeUserError(
 			`This tool requires a schematic document, but the currently active tab is not a schematic${current}. Pass a schematic document UUID as the "document" parameter, or use editor_open_document to switch.`,
 		);
 	}
@@ -315,6 +321,9 @@ function handleMessage(extensionUuid: string, event: MessageEvent<any>): void {
 		if (request.type === 'pong') return;
 		if (request.type === 'hello') return; // just a "you're connected" signal
 		if (request.type === 'auth.challenge') {
+			// Mark PENDING before the async token read so any request that
+			// follows this challenge on the wire waits for the verdict.
+			verificationGate().challengeReceived();
 			answerAuthChallenge(extensionUuid, String(request.tokenPath || ''), request.scheme, request.serverNonce);
 			return;
 		}
@@ -359,6 +368,29 @@ function handleMessage(extensionUuid: string, event: MessageEvent<any>): void {
 		// a late eda.* mutation would land on whichever document is now
 		// active, not the one this task was invoked against.
 		enqueueRequest(async (isForceReleased) => {
+			// D1 gating (QA 2026-08-23 Major 3): do not execute anything for a
+			// peer that has not proven itself when it could have. Waits while
+			// the hmac exchange is still pending (bounded by the gate's
+			// timeout); refuses on 'unverified' and on 'idle' (no challenge at
+			// all, which the real daemon never skips). 'not-applicable' (we
+			// could not read the token) keeps the pre-1.6.1 Origin-trust
+			// behaviour, because there is nothing we could have checked.
+			const verdict = await verificationGate().verdict();
+			if (isForceReleased()) {
+				bridgeLog(`H11: dropping request id ${id} (${method}) after verification wait, slot force-released`);
+				return;
+			}
+			if (!allowsRequests(verdict)) {
+				const why = verificationGate().reason() ?? (verdict === 'idle' ? 'no auth.challenge was received on this connection' : verdict);
+				bridgeLog(`D1: refusing ${method} (id ${id}): daemon not verified (${why})`);
+				sendResponse(
+					extensionUuid,
+					id!,
+					undefined,
+					`Bridge daemon not verified (${why}); refusing to execute "${method}". The extension could read the bridge token but the daemon did not prove knowledge of it. If you just updated the extension or the MCP server, run bridge_restart so the new daemon loads; otherwise check what is listening on the bridge port (16168).`,
+				);
+				return;
+			}
 			try {
 				if (document) {
 					await switchToDocument(document);
@@ -393,7 +425,12 @@ function handleMessage(extensionUuid: string, event: MessageEvent<any>): void {
 				}
 				const check = checkActiveDocument(document, (activeInfo ?? undefined) as any);
 				if (!check.ok) {
-					bridgeLog(`Q1: document switch verification failed for id ${id} (${method}): ${check.reason}`);
+					// Log the raw identity object too: symbol/footprint editor tabs
+					// (doctype 2/4) have not been verified live, and if they report
+					// identity in another shape this line is the diagnosis.
+					let rawInfo = '';
+					try { rawInfo = JSON.stringify(activeInfo).slice(0, 500); } catch { rawInfo = '<unserialisable>'; }
+					bridgeLog(`Q1: document switch verification failed for id ${id} (${method}): ${check.reason}; getCurrentDocumentInfo()=${rawInfo}`);
 					sendResponse(
 						extensionUuid,
 						id!,
@@ -503,34 +540,52 @@ function sendNotification(extensionUuid: string, type: string, data: any): void 
 }
 
 // D1 mutual auth state: nonces and token from the last hmac-v1 challenge we
-// answered, so auth.ok can be verified; plus a per-connection "daemon
-// verified" flag and a one-time toast guard. All on globalThis to survive
-// IIFE re-evaluations; reset on every (re)connect.
+// answered, so auth.ok can be verified; plus the verification gate that the
+// request pipeline awaits (daemon-verification.ts) and a one-time toast
+// guard. All on globalThis to survive IIFE re-evaluations; reset on every
+// (re)connect.
 const AUTH_STATE_KEY = '__claude_mcp_auth_state__';
-const DAEMON_VERIFIED_KEY = '__claude_mcp_daemon_verified__';
+const VERIFICATION_GATE_KEY = '__claude_mcp_verification_gate__';
 const UNVERIFIED_TOAST_KEY = '__claude_mcp_unverified_toast_shown__';
+// How long the whole exchange (token read, our answer, the daemon's auth.ok)
+// may take from the moment the challenge arrives. The real daemon answers
+// within the same event-loop turn and the token read is a local file; 5 s is
+// generous for a busy machine and short enough that a silent rogue (or a
+// hung token read) is flagged promptly.
+const DAEMON_AUTH_OK_TIMEOUT_MS = 5_000;
+
+function verificationGate(): VerificationGate {
+	const g = globalThis as any;
+	if (!g[VERIFICATION_GATE_KEY]) {
+		g[VERIFICATION_GATE_KEY] = createVerificationGate({
+			timeoutMs: DAEMON_AUTH_OK_TIMEOUT_MS,
+			onUnverified: warnUnverifiedDaemonOnce,
+		});
+	}
+	return g[VERIFICATION_GATE_KEY] as VerificationGate;
+}
 
 function resetDaemonAuthState(): void {
 	const g = globalThis as any;
 	g[AUTH_STATE_KEY] = null;
-	g[DAEMON_VERIFIED_KEY] = false;
 	g[UNVERIFIED_TOAST_KEY] = false;
+	verificationGate().reset();
 }
 
 export function isDaemonVerified(): boolean {
-	return (globalThis as any)[DAEMON_VERIFIED_KEY] === true;
+	return verificationGate().state() === 'verified';
 }
 
 function warnUnverifiedDaemonOnce(reason: string): void {
 	const g = globalThis as any;
-	bridgeLog(`daemon NOT verified: ${reason}`);
+	bridgeLog(`daemon NOT verified: ${reason}; requests on this connection will be refused`);
 	if (g[UNVERIFIED_TOAST_KEY]) return;
 	g[UNVERIFIED_TOAST_KEY] = true;
 	try {
 		eda.sys_Message.showToastMessage(
-			`Connected to an UNVERIFIED Claude bridge daemon (${reason}). If you did not expect this, disconnect and check what is listening on the bridge port.`,
+			`Claude bridge daemon NOT verified (${reason}). Requests are being refused. If you just updated, restart the bridge; otherwise check what is listening on port ${BRIDGE_PORT}.`,
 			ESYS_ToastMessageType.WARNING,
-			8,
+			10,
 		);
 	} catch { /* toast is best-effort */ }
 }
@@ -564,6 +619,9 @@ async function answerAuthChallenge(
 	if (!check.ok) {
 		bridgeLog(`auth.challenge refused: ${check.reason} (path=${JSON.stringify(tokenPath)})`);
 		sendNotification(extensionUuid, 'auth', { token: null });
+		// A peer asking us to read an arbitrary file is not the daemon;
+		// settle the gate so requests are refused rather than left waiting.
+		verificationGate().challengeRefused(check.reason);
 		return;
 	}
 	let token: string | null = null;
@@ -577,18 +635,29 @@ async function answerAuthChallenge(
 		// version. token stays null.
 	}
 	const answer = await buildExtensionAuthAnswer({ scheme, serverNonce }, token);
+	const gate = verificationGate();
 	if (answer.kind === 'hmac') {
 		(globalThis as any)[AUTH_STATE_KEY] = {
 			token,
 			serverNonce: serverNonce as string,
 			clientNonce: answer.clientNonce,
 		};
-	} else if (token !== null) {
-		// We could read the token but the peer does not speak hmac-v1, so it
-		// cannot be verified (and we refuse to hand it the raw token).
-		warnUnverifiedDaemonOnce('bridge daemon does not support mutual auth; update the MCP server/daemon');
+		sendNotification(extensionUuid, 'auth', answer.data);
+		// The daemon now owes us auth.ok; the timer armed at the challenge
+		// settles the gate 'unverified' if it never comes (a silent rogue, or
+		// a daemon that sent the challenge and then died).
+		return;
 	}
 	sendNotification(extensionUuid, 'auth', answer.data);
+	if (token === null) {
+		// Nothing we could have checked: browser build or permission off.
+		// The daemon decides under its own policy (default: Origin trust).
+		gate.tokenUnreadable();
+	} else {
+		// We could read the token but the peer does not speak hmac-v1, so it
+		// cannot be verified (and we refuse to hand it the raw token).
+		gate.legacyPeer();
+	}
 }
 
 /**
@@ -599,17 +668,22 @@ async function answerAuthChallenge(
 function handleAuthOk(mac: unknown): void {
 	const g = globalThis as any;
 	const state = g[AUTH_STATE_KEY] as { token: string; serverNonce: string; clientNonce: string } | null;
-	if (!state || typeof mac !== 'string') return;
+	const gate = verificationGate();
+	if (!state) return; // auth.ok without a pending hmac exchange: ignore
+	if (typeof mac !== 'string') {
+		gate.authOkChecked(false);
+		return;
+	}
 	hmacSha256Hex(state.token, daemonMacMessage(state.clientNonce, state.serverNonce))
 		.then((expected) => {
-			if (mac === expected) {
-				g[DAEMON_VERIFIED_KEY] = true;
-				bridgeLog('daemon verified via hmac-v1 mutual auth');
-			} else {
-				warnUnverifiedDaemonOnce('daemon failed the mutual auth check');
-			}
+			const ok = mac === expected;
+			if (ok) bridgeLog('daemon verified via hmac-v1 mutual auth');
+			gate.authOkChecked(ok);
 		})
-		.catch(() => { /* webcrypto unavailable; stay unverified */ });
+		.catch(() => {
+			// webcrypto unavailable: we cannot check, so we do not trust.
+			gate.authOkChecked(false);
+		});
 }
 
 /**
@@ -617,6 +691,9 @@ function handleAuthOk(mac: unknown): void {
  * Called when the active document changes, etc.
  */
 async function pushInstanceInfo(extensionUuid: string): Promise<void> {
+	if (!isConnected()) return;
+	// Same gate as requests: a refused peer gets no project name or tab list.
+	if (!allowsRequests(await verificationGate().verdict())) return;
 	if (!isConnected()) return;
 	const info = await getInstanceInfo();
 	sendNotification(extensionUuid, 'instanceInfo', info);
@@ -660,6 +737,12 @@ function connect(extensionUuid: string): void {
 
 	const wasConnectedBefore = (globalThis as any)[CONNECTED_EVER_KEY] === true;
 
+	// Fresh socket, fresh daemon-verification state (D1). Reset BEFORE
+	// registering so the gate is already idle when the first message
+	// (the daemon's auth.challenge) arrives, whatever order the wrapper
+	// fires open/message callbacks in.
+	resetDaemonAuthState();
+
 	try {
 		eda.sys_WebSocket.register(
 			WS_ID,
@@ -670,9 +753,6 @@ function connect(extensionUuid: string): void {
 				setConnected(true);
 				setLastReceived(Date.now());
 				(globalThis as any)[CONNECTED_EVER_KEY] = true;
-				// Fresh connection, fresh daemon-verification state (D1): the
-				// challenge for this socket has not been answered yet.
-				resetDaemonAuthState();
 				// Reset reconnect cadence so future drops get the eager 2s/5s retries
 				// instead of skipping straight to the 15s steady-state.
 				resetReconnectAttempts();

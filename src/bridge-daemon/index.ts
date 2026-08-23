@@ -20,12 +20,13 @@ import { WebSocketServer, WebSocket } from 'ws';
 import type { IncomingMessage } from 'http';
 import { createServer as createNetServer, type Socket as NetSocket } from 'node:net';
 import { mkdir, unlink, writeFile, chmod } from 'node:fs/promises';
-import { statSync } from 'node:fs';
+import { statSync, fstatSync, copyFileSync, ftruncateSync } from 'node:fs';
 import { createConnection } from 'node:net';
 import { randomBytes, createHash, createHmac, timingSafeEqual } from 'node:crypto';
 import {
 	socketPath,
 	pidPath,
+	logPath,
 	stateDir,
 	wsPort,
 	wsTokenPath,
@@ -38,6 +39,14 @@ import type { InstanceInfo, ToolContext } from './types';
 import { ToolRegistry } from './registry';
 import { createRequestIdGenerator } from './request-id';
 import { AUTH_SCHEME_HMAC_V1, extMacMessage, daemonMacMessage } from './auth-mac';
+
+// QA 2026-08-23 Major 1: injected by esbuild (config/esbuild.prod.ts) from
+// package.json, same define the MCP proxy uses. The daemon outlives rebuilds
+// (it idle-exits only when the last MCP client disconnects), so the version
+// that is actually resident must be observable from server_info.
+declare const __EASYEDA_MCP_VERSION__: string | undefined;
+const DAEMON_VERSION =
+	typeof __EASYEDA_MCP_VERSION__ !== 'undefined' && __EASYEDA_MCP_VERSION__ ? __EASYEDA_MCP_VERSION__ : '0.0.0-dev';
 
 const ALLOWED_ORIGIN_PATTERNS = [
 	/^https?:\/\/([a-z0-9-]+\.)*easyeda\.com(:\d+)?$/,
@@ -165,9 +174,38 @@ const nextExtRequestId = createRequestIdGenerator(randomBytes(3).toString('hex')
 
 let idleExitTimer: ReturnType<typeof setTimeout> | null = null;
 
+// D6 follow-up (QA 2026-08-23 Minor 4): spawn.ts rotates bridge.log only when
+// it starts a daemon, and a daemon can stay resident for weeks, so also
+// rotate from inside. Our stdout/stderr ARE the log file (spawn.ts opens it
+// O_APPEND and hands us the fd), so copy-and-truncate works: copy to .1,
+// ftruncate our own fd 2 to zero, and O_APPEND carries on from offset 0.
+// Only when fd 2 really is that file (not a tty or a test pipe); best-effort.
+const LOG_ROTATE_BYTES = 5 * 1024 * 1024;
+const LOG_ROTATE_CHECK_EVERY = 256;
+let logCallsSinceCheck = 0;
+
+function maybeRotateLogInPlace(): void {
+	if (++logCallsSinceCheck < LOG_ROTATE_CHECK_EVERY) return;
+	logCallsSinceCheck = 0;
+	try {
+		const path = logPath();
+		const onDisk = statSync(path);
+		if (onDisk.size <= LOG_ROTATE_BYTES) return;
+		const ours = fstatSync(2);
+		if (ours.ino !== onDisk.ino || ours.dev !== onDisk.dev) return;
+		copyFileSync(path, `${path}.1`);
+		ftruncateSync(2, 0);
+		console.error(`[${new Date().toISOString()}] [daemon] bridge.log rotated in place (${onDisk.size} bytes moved to bridge.log.1)`);
+	} catch {
+		// Missing file, permissions, or a platform without O_APPEND semantics
+		// on truncate: spawn-time rotation still bounds the next run.
+	}
+}
+
 function log(...args: unknown[]): void {
 	const ts = new Date().toISOString();
 	console.error(`[${ts}] [daemon]`, ...args);
+	maybeRotateLogInPlace();
 }
 
 // -----------------------------------------------------------------------------
@@ -249,6 +287,7 @@ const toolContext: ToolContext = {
 	getConnectedCount: () => extensions.size,
 	isConnected: () => extensions.size > 0,
 	getPort: () => wsPort(),
+	getDaemonVersion: () => DAEMON_VERSION,
 	refreshAllInstanceInfo,
 	requestRestart: (delayMs = 100) => {
 		setTimeout(() => shutdown(0), delayMs).unref();
@@ -327,6 +366,12 @@ function disconnectClient(client: McpClient): void {
 function updateInstanceInfo(instanceId: string, data: Record<string, unknown>): void {
 	const ext = extensions.get(instanceId);
 	if (!ext) return;
+	if (typeof data.extensionVersion === 'string' && data.extensionVersion !== ext.info.extensionVersion) {
+		ext.info.extensionVersion = data.extensionVersion;
+		if (data.extensionVersion !== DAEMON_VERSION) {
+			log(`WARNING: extension ${instanceId} runs v${data.extensionVersion} but this daemon is v${DAEMON_VERSION}; reinstall the .eext or run bridge_restart so both layers match`);
+		}
+	}
 	if (data.projectName !== undefined) ext.info.projectName = data.projectName as string;
 	if (data.currentDocument !== undefined) ext.info.currentDocument = data.currentDocument as string;
 	if (data.documentType !== undefined) ext.info.documentType = data.documentType as string;
@@ -531,11 +576,15 @@ function startWebSocketServer(): Promise<void> {
 							if (expected !== null && macMatches(expected, answer.mac)) {
 								authed = true;
 								log(`Extension verified via hmac-v1 (instance: ${instanceId})`);
-								if (!registered) registerExtension();
+								// auth.ok goes out BEFORE registration: registering
+								// sends hello and an instance.getInfo request, and
+								// since 1.6.1 the extension holds requests until it
+								// has checked auth.ok, so the proof must precede them.
 								ws.send(JSON.stringify({
 									type: 'auth.ok',
 									mac: hmacHex(wsAuthToken!, daemonMacMessage(answer.clientNonce, serverNonce)),
 								}));
+								if (!registered) registerExtension();
 							} else {
 								log(`Extension hmac answer INVALID (instance: ${instanceId}), closing`);
 								ws.close(4003, 'invalid auth mac');
@@ -831,7 +880,7 @@ async function main(): Promise<void> {
 	if (process.env.EDA_WS_ALLOW_ALL_ORIGINS === '1') {
 		log('WARNING: EDA_WS_ALLOW_ALL_ORIGINS=1 — the WS Origin allowlist is DISABLED and any local page or process may connect (subject to the auth policy). This is a debugging escape hatch; unset it for normal use.');
 	}
-	log(`Daemon started (pid ${process.pid}, idle-exit ${idleExitSeconds()}s, tools=${registry.listDescriptors().length})`);
+	log(`Daemon v${DAEMON_VERSION} started (pid ${process.pid}, idle-exit ${idleExitSeconds()}s, tools=${registry.listDescriptors().length})`);
 	scheduleIdleExitCheck();
 }
 

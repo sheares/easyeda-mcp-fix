@@ -14,6 +14,7 @@ const stubCtx: ToolContext = {
 	getConnectedCount: () => 0,
 	isConnected: () => false,
 	getPort: () => 16168,
+	getDaemonVersion: () => '0.0.0-test',
 	refreshAllInstanceInfo: async () => {},
 	requestRestart: () => {},
 };
