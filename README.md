@@ -67,16 +67,28 @@ and answers with an HMAC over the nonces, and the daemon proves its own
 token knowledge back with a domain-separated HMAC the extension verifies.
 The raw token never crosses the wire, and a rogue process that binds the
 port cannot impersonate either side. A wrong answer always closes the
-socket. By default a connection that *cannot* read the token (the browser
-web app, or a desktop install without the extension's external
-interaction permission) is still accepted on Origin trust, matching
-pre-C4 behaviour — the extension then shows a one-time "unverified
-daemon" warning. Set `EDA_WS_AUTH=require` in the daemon's environment to
-refuse unauthenticated connections entirely (hardened mode; desktop
-client only, and the extension's external interaction permission must be
-enabled). Upgrade note: a v1.6.0 `.eext` never sends the raw token, so
-against a pre-1.6.0 daemon it runs on Origin trust; `EDA_WS_AUTH=require`
-needs both sides at 1.6.0+.
+socket.
+
+Since v1.6.1 the extension also *enforces* its side: when it could read the
+token, it refuses every request from a daemon that has not proven itself,
+whether the daemon's `auth.ok` failed, never arrived (5 s timeout), or the
+peer did not offer hmac-v1 at all. The refusal is a clear error on each
+call plus a one-time toast. A connection that *cannot* read the token (the
+browser web app, or a desktop install without the extension's external
+interaction permission) has nothing to check and is still accepted on
+Origin trust, matching pre-C4 behaviour. Set `EDA_WS_AUTH=require` in the
+daemon's environment to refuse those too (hardened mode; desktop client
+only, and the extension's external interaction permission must be
+enabled).
+
+Upgrade notes: a v1.6.x `.eext` never sends the raw token. A v1.6.1+
+`.eext` against a pre-1.6.0 daemon refuses all requests until the daemon
+is restarted on the new build (`bridge_restart` still works: the daemon
+answers it without touching the extension). The daemon stays resident
+across rebuilds while any MCP client is attached, so after a rebuild check
+`server_info`: it reports `daemonVersion`, each instance's
+`extensionVersion`, and `versionMismatch`. EasyEDA ignores a same-version
+`.eext` reinstall, so bump the version before rebuilding.
 
 Two QA passes on 2026-07-24
 ([`QA-REPORT-2026-07-24.md`](QA-REPORT-2026-07-24.md),
@@ -85,7 +97,10 @@ further hardening round: document-switch verification before every routed
 operation, pre-write backups on bulk supplier swaps, MCP risk annotations
 on all ~100 tools, the mutual auth above, and assorted transport and
 correctness fixes. See [`HANDOVER-2026-07-24.md`](HANDOVER-2026-07-24.md)
-for the work-order trail.
+for the work-order trail. A third pass on 2026-08-23
+([`QA-REPORT-2026-08-23.md`](QA-REPORT-2026-08-23.md)) verified that round
+live and produced v1.6.1: request gating on daemon verification, version
+reporting in `server_info`, in-place log rotation, and smaller fixes.
 
 ### Environment variables
 
@@ -109,7 +124,7 @@ All knobs are daemon/server side; the extension has no environment access.
 git clone https://github.com/sheares/easyeda-mcp-fix.git
 cd easyeda-mcp-fix
 npm install
-npm test              # 176 tests
+npm test              # 188 tests
 npm run build         # produces build/dist/easyeda-agent-mcp-server_vN.N.N.eext
 ```
 
@@ -150,7 +165,7 @@ src/
   lib/           schematic editing library (start at src/lib/README.md)
 docs/            .esch / .epcb / .epro file format reference
 examples/        working examples using the editing library
-tests/           176 tests (node --test, ts-node)
+tests/           188 tests (node --test, ts-node)
 ```
 
 ## Two distinct pieces
