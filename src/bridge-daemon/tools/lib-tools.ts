@@ -151,7 +151,7 @@ export function libTools(ctx: ToolContext): ToolDef[] {
 		{
 			name: 'lib_symbol_open_in_editor',
 			annotations: ANN.NAV,
-			description: 'Open a library symbol in the EasyEDA editor as a tab. Returns the new tabId — use that as the document UUID for document_get_source.',
+			description: 'Open a library symbol in the EasyEDA editor as a tab. Returns the new tabId — use that as the document UUID for document_get_source. Only symbols in a personal, team or project library can be opened; EDA Pro refuses system-library symbols (the call errors rather than returning a tabId), so lib_symbol_copy one into your own library first.',
 			inputShape: withInstanceParam({
 				symbolUuid: z.string().describe('Symbol UUID'),
 				libraryUuid: z.string().describe('Library UUID containing the symbol'),

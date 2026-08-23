@@ -201,6 +201,7 @@ Returns { dryRun, swappedCount, swapped:[{primitiveId, designator, page, before,
 				// Q2: this is a bulk mutation — snapshot before writing, like every
 				// other document-destructive tool. dryRun takes no backup.
 				let backup: BackupResult | undefined;
+				let backupScope: 'document' | 'project' | 'document-fallback' = 'document';
 				if (params.dryRun !== true) {
 					if (params.allSchematicPages === true) {
 						// Multi-page swaps can touch every schematic page; a single-
@@ -211,6 +212,7 @@ Returns { dryRun, swappedCount, swapped:[{primitiveId, designator, page, before,
 							instance_id: params.instance_id,
 							document: params.document,
 						});
+						backupScope = projectUuid !== undefined ? 'project' : 'document-fallback';
 						backup = projectUuid !== undefined
 							? await backupProject(ctx, { instance_id: params.instance_id, projectUuid, toolName: 'sch_swap_supplier_part' })
 							: await backupDocument(ctx, { instance_id: params.instance_id, document: params.document, toolName: 'sch_swap_supplier_part' });
@@ -227,6 +229,9 @@ Returns { dryRun, swappedCount, swapped:[{primitiveId, designator, page, before,
 				if (backup) {
 					payload.backup = backup;
 					payload.note = formatBackupSummary(backup);
+					if (backupScope === 'document-fallback') {
+						payload.note += ' CAUTION: the project uuid could not be resolved, so only the active document was snapshotted although every schematic page was walked; other pages have no pre-swap backup.';
+					}
 				}
 				return { content: [{ type: 'text', text: JSON.stringify(payload, null, 2) }] };
 			},

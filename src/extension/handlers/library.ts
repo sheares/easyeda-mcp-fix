@@ -1,3 +1,5 @@
+import { BridgeUserError } from '../diag';
+
 export const libraryHandlers: Record<string, (params: Record<string, any>) => Promise<any>> = {
 	'lib.device.search': async (params) => {
 		return eda.lib_Device.search(
@@ -63,7 +65,17 @@ export const libraryHandlers: Record<string, (params: Record<string, any>) => Pr
 	},
 
 	'lib.symbol.openInEditor': async (params) => {
-		return eda.lib_Symbol.openInEditor(params.symbolUuid, params.libraryUuid, params.splitScreenId);
+		const result = await eda.lib_Symbol.openInEditor(params.symbolUuid, params.libraryUuid, params.splitScreenId);
+		// The SDK returns `false` (no throw, no tab) when it will not open the
+		// symbol, which in the field includes every system-library symbol.
+		// Surface that as an error instead of a bare boolean the caller then
+		// tries to use as a tabId.
+		if (typeof result !== 'string' || result.length === 0) {
+			throw new BridgeUserError(
+				`EDA Pro refused to open symbol ${params.symbolUuid} (library ${params.libraryUuid}) in the editor (returned ${JSON.stringify(result)}). System-library symbols cannot be opened this way; copy the symbol into a personal or project library first (lib_symbol_copy) and open that copy.`,
+			);
+		}
+		return result;
 	},
 
 	'lib.symbol.updateDocumentSource': async (params) => {

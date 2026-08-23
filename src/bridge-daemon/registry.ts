@@ -91,6 +91,43 @@ export class ToolRegistry {
 		if (!entry) {
 			throw new Error(`Unknown tool: ${name}`);
 		}
-		return entry.def.handler(args);
+		return annotateOversizedResult(name, args, await entry.def.handler(args));
 	}
+}
+
+/** Above this many bytes of text content, a result gets a cost note appended. */
+export const OVERSIZED_RESULT_BYTES = 100 * 1024;
+
+/**
+ * QA 2026-08-23 Minor 6: there is deliberately no hard cap on result size
+ * (truncating a document source or a primitive dump would either corrupt a
+ * round-trip or make large boards unreadable), but a caller should at least
+ * be told when a result was expensive and how to narrow the next one. The
+ * note is a SEPARATE content block so the first block stays byte-identical
+ * and parseable.
+ */
+export function annotateOversizedResult(
+	name: string,
+	args: Record<string, unknown>,
+	result: CallToolResult,
+): CallToolResult {
+	const content = Array.isArray(result?.content) ? result.content : null;
+	if (!content) return result;
+	let bytes = 0;
+	for (const block of content) {
+		if (block && block.type === 'text' && typeof block.text === 'string') bytes += Buffer.byteLength(block.text, 'utf8');
+	}
+	if (bytes <= OVERSIZED_RESULT_BYTES) return result;
+	const kb = Math.round(bytes / 1024);
+	const narrowed = args.fields !== undefined || args.limit !== undefined || args.filter !== undefined;
+	const hint = narrowed
+		? 'It is already narrowed with fields/filter/limit; tighten them further if you do not need all of this.'
+		: 'If this tool accepts fields, filter or limit, pass them to return only what you need; for raw document sources prefer document_save_to_file and read the file on disk.';
+	return {
+		...result,
+		content: [
+			...content,
+			{ type: 'text', text: `NOTE: ${name} returned about ${kb} KB, which costs context every time it is read. ${hint}` },
+		],
+	};
 }

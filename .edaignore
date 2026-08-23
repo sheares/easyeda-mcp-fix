@@ -29,6 +29,7 @@
 /.edaignore
 /AUDIT.md
 HANDOVER*.md
+QA-*.md
 /tsconfig.extension.json
 .DS_Store
 debug.log
