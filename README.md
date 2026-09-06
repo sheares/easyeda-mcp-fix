@@ -71,9 +71,12 @@ socket.
 
 Since v1.6.1 the extension also *enforces* its side: when it could read the
 token, it refuses every request from a daemon that has not proven itself,
-whether the daemon's `auth.ok` failed, never arrived (5 s timeout), or the
-peer did not offer hmac-v1 at all. The refusal is a clear error on each
-call plus a one-time toast. A connection that *cannot* read the token (the
+whether the daemon's `auth.ok` failed, never arrived (15 s window from the
+challenge, since v1.6.2; 5 s in v1.6.1), or the peer did not offer hmac-v1
+at all. The refusal is a clear error on each call plus a one-time toast. A
+valid `auth.ok` that arrives after the window (a slow handshake, not a
+rogue: a rogue cannot forge the MAC) upgrades the verdict, a second toast
+says so, and requests resume without a reconnect. A connection that *cannot* read the token (the
 browser web app, or a desktop install without the extension's external
 interaction permission) has nothing to check and is still accepted on
 Origin trust, matching pre-C4 behaviour. Set `EDA_WS_AUTH=require` in the
@@ -100,7 +103,11 @@ correctness fixes. See [`HANDOVER-2026-07-24.md`](HANDOVER-2026-07-24.md)
 for the work-order trail. A third pass on 2026-08-23
 ([`QA-REPORT-2026-08-23.md`](QA-REPORT-2026-08-23.md)) verified that round
 live and produced v1.6.1: request gating on daemon verification, version
-reporting in `server_info`, in-place log rotation, and smaller fixes.
+reporting in `server_info`, in-place log rotation, and smaller fixes. A
+fourth pass on 2026-09-06
+([`QA-REPORT-2026-09-06.md`](QA-REPORT-2026-09-06.md)), after two weeks of
+field use, produced v1.6.2: late-`auth.ok` recovery and a headless harness
+for the extension's request pipeline.
 
 ### Environment variables
 
@@ -124,7 +131,7 @@ All knobs are daemon/server side; the extension has no environment access.
 git clone https://github.com/sheares/easyeda-mcp-fix.git
 cd easyeda-mcp-fix
 npm install
-npm test              # 188 tests
+npm test              # 199 tests
 npm run build         # produces build/dist/easyeda-agent-mcp-server_vN.N.N.eext
 ```
 
@@ -165,7 +172,7 @@ src/
   lib/           schematic editing library (start at src/lib/README.md)
 docs/            .esch / .epcb / .epro file format reference
 examples/        working examples using the editing library
-tests/           188 tests (node --test, ts-node)
+tests/           199 tests (node --test, ts-node)
 ```
 
 ## Two distinct pieces

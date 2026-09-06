@@ -16,6 +16,14 @@ Key commands: `npm run typecheck` (both tsconfigs), `npm test` (49 tests, 4 suit
 
 ## State as of this session
 
+> **Orientation for later sessions (added 2026-09-06).** This file is the
+> 2026-07-02 handover and its "State" bullets are historical. The current
+> trail is: dated `HANDOVER-*.md` work orders (latest
+> `HANDOVER-2026-07-24.md`, fully implemented) and dated `QA-REPORT-*.md`
+> files (latest `QA-REPORT-2026-09-06.md`), each carrying an outcome table.
+> There is deliberately no `PROJECT.md`; QA outcomes are recorded in those
+> dated reports instead. Do not create one.
+
 - Full audit done → `AUDIT.md` (severity-ranked, file:line cites, suggested order of attack).
 - **Verified:** typecheck clean on both configs; all 49 tests pass (35 lib, 14 bridge-daemon).
 - Nothing is committed. `git status` shows the working tree carrying BOTH this session's fixes AND the owner's earlier in-progress work (see below). Suggest committing the fixes in themed chunks.
