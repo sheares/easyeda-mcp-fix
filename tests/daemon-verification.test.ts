@@ -57,9 +57,53 @@ test('absent auth.ok (or a hung token read): timer expiry settles unverified and
 	assert.equal(reasons.length, 1);
 	assert.match(reasons[0], /did not complete within 5000ms/);
 	assert.equal(allowsRequests(gate.state()), false);
-	// A late auth.ok must not flip the verdict callers already acted on.
-	gate.authOkChecked(true);
+});
+
+test('a MAC-verified auth.ok after the timeout upgrades to verified and reports the earlier reason', async () => {
+	const late: Array<string | null> = [];
+	const timers = manualTimers();
+	const gate = createVerificationGate({
+		timeoutMs: 5000,
+		onVerifiedLate: (r) => late.push(r),
+		schedule: timers.schedule,
+		cancel: timers.cancel,
+	});
+	gate.challengeReceived();
+	timers.fire();
 	assert.equal(gate.state(), 'unverified');
+	gate.authOkChecked(true);
+	assert.equal(gate.state(), 'verified');
+	assert.equal(gate.reason(), null);
+	assert.equal(late.length, 1);
+	assert.match(late[0] ?? '', /did not complete/);
+	assert.equal(await gate.verdict(), 'verified');
+});
+
+test('a valid auth.ok also upgrades a legacy-peer or bad-MAC verdict; nothing downgrades verified', async () => {
+	const { gate } = makeGate();
+	gate.challengeReceived();
+	gate.legacyPeer();
+	assert.equal(gate.state(), 'unverified');
+	gate.authOkChecked(true);
+	assert.equal(gate.state(), 'verified');
+	// Once verified, a later bad or absent proof is ignored.
+	gate.authOkChecked(false);
+	assert.equal(gate.state(), 'verified');
+
+	const second = makeGate();
+	second.gate.challengeReceived();
+	second.gate.authOkChecked(false);
+	assert.equal(second.gate.state(), 'unverified');
+	second.gate.authOkChecked(true);
+	assert.equal(second.gate.state(), 'verified');
+});
+
+test('a valid auth.ok does not touch not-applicable', async () => {
+	const { gate } = makeGate();
+	gate.challengeReceived();
+	gate.tokenUnreadable();
+	gate.authOkChecked(true);
+	assert.equal(gate.state(), 'not-applicable');
 });
 
 test('bad auth.ok settles unverified', async () => {
@@ -94,12 +138,13 @@ test('request before any challenge resolves idle immediately and is refused', as
 	assert.equal(allowsRequests('idle'), false);
 });
 
-test('reset cancels the timer, wakes waiters with idle, and forgets the verdict', async () => {
+test('reset cancels the timer, wakes waiters with reset (not idle), and forgets the verdict', async () => {
 	const { gate, timers } = makeGate();
 	gate.challengeReceived();
 	const v = gate.verdict();
 	gate.reset();
-	assert.equal(await v, 'idle');
+	assert.equal(await v, 'reset');
+	assert.equal(allowsRequests('reset'), false);
 	assert.equal(timers.count(), 0);
 	assert.equal(gate.state(), 'idle');
 	assert.equal(gate.reason(), null);

@@ -23,7 +23,14 @@
 //     older than 1.6.0, or a rogue fishing with the legacy challenge) is
 //     UNVERIFIED;
 //   - a request arriving before any challenge (IDLE) is refused: the real
-//     daemon challenges first thing on every connection.
+//     daemon challenges first thing on every connection;
+//   - a MAC-verified auth.ok that arrives AFTER the gate settled unverified
+//     (a benign overrun: EasyEDA's main process busy so the token read over
+//     IPC stalled, or the daemon's event loop busy) upgrades the verdict to
+//     verified. A rogue cannot forge that MAC, so the upgrade is safe, and
+//     without it a transient stall would leave the bridge refusing every
+//     request until the socket happened to drop (QA 2026-09-06, Major 1).
+//     Bad or absent proof never downgrades an earlier 'verified'.
 //
 // verdict() is what the request pipeline awaits. allowsRequests() is the
 // policy in one place. Pure module (no `eda` imports, injectable timers) so
@@ -31,11 +38,21 @@
 
 export type VerificationState = 'idle' | 'pending' | 'verified' | 'unverified' | 'not-applicable';
 
+/**
+ * What verdict() resolves to. 'reset' is only ever handed to a waiter whose
+ * socket went away mid-wait (reset() ran); the gate's own state() is 'idle'
+ * by then. Callers drop such a request: the daemon has already rejected it
+ * on socket close.
+ */
+export type Verdict = VerificationState | 'reset';
+
 export interface VerificationGateOptions {
-	/** How long to wait for auth.ok after sending an hmac answer. */
+	/** How long the whole exchange may take from the challenge to a checked auth.ok. */
 	timeoutMs: number;
 	/** Called once per settlement into 'unverified', with a human reason. */
 	onUnverified?: (reason: string) => void;
+	/** Called when a valid auth.ok upgrades an 'unverified' gate; receives the earlier reason. */
+	onVerifiedLate?: (earlierReason: string | null) => void;
 	schedule?: (fn: () => void, ms: number) => unknown;
 	cancel?: (handle: unknown) => void;
 }
@@ -52,7 +69,7 @@ export interface VerificationGate {
 	/** The challenge itself was unacceptable (e.g. a token path outside the state dir). */
 	challengeRefused(reason: string): void;
 	/** Resolves once the gate is settled; immediately if it already is. */
-	verdict(): Promise<VerificationState>;
+	verdict(): Promise<Verdict>;
 	state(): VerificationState;
 	/** The reason recorded at the last 'unverified' settlement, if any. */
 	reason(): string | null;
@@ -60,9 +77,9 @@ export interface VerificationGate {
 	reset(): void;
 }
 
-/** Policy: may a request run under this state? Only the two proven-or-unprovable outcomes. */
-export function allowsRequests(state: VerificationState): boolean {
-	return state === 'verified' || state === 'not-applicable';
+/** Policy: may a request run under this verdict? Only the two proven-or-unprovable outcomes. */
+export function allowsRequests(verdict: Verdict): boolean {
+	return verdict === 'verified' || verdict === 'not-applicable';
 }
 
 export function createVerificationGate(opts: VerificationGateOptions): VerificationGate {
@@ -72,7 +89,7 @@ export function createVerificationGate(opts: VerificationGateOptions): Verificat
 	let state: VerificationState = 'idle';
 	let reason: string | null = null;
 	let timer: unknown = null;
-	let waiters: Array<(s: VerificationState) => void> = [];
+	let waiters: Array<(v: Verdict) => void> = [];
 
 	const clearTimer = (): void => {
 		if (timer !== null) {
@@ -108,6 +125,19 @@ export function createVerificationGate(opts: VerificationGateOptions): Verificat
 			}, opts.timeoutMs);
 		},
 		authOkChecked(ok) {
+			if (ok && state === 'unverified') {
+				// Late but genuine proof: upgrade. The earlier verdict was a
+				// timeout, a legacy/refused challenge, or a bad MAC; a peer
+				// that can now produce a valid MAC holds the token and is the
+				// daemon, so every one of those was a false alarm in hindsight.
+				const earlier = reason;
+				state = 'verified';
+				reason = null;
+				try {
+					opts.onVerifiedLate?.(earlier);
+				} catch { /* logging must never break the gate */ }
+				return;
+			}
 			settle(ok ? 'verified' : 'unverified', ok ? null : 'daemon failed the mutual auth check');
 		},
 		tokenUnreadable() {
@@ -138,9 +168,11 @@ export function createVerificationGate(opts: VerificationGateOptions): Verificat
 			reason = null;
 			const toWake = waiters;
 			waiters = [];
-			// Anything still waiting belonged to the old socket; let it see
-			// 'idle' and refuse rather than hang.
-			for (const w of toWake) w('idle');
+			// Anything still waiting belonged to the old socket; tell it so
+			// (distinct from 'idle', which means "no challenge on THIS socket")
+			// so the caller can drop it rather than answer with a misleading
+			// refusal (QA 2026-09-06, Minor 1).
+			for (const w of toWake) w('reset');
 		},
 	};
 }

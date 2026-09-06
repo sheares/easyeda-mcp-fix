@@ -380,6 +380,13 @@ function handleMessage(extensionUuid: string, event: MessageEvent<any>): void {
 				bridgeLog(`H11: dropping request id ${id} (${method}) after verification wait, slot force-released`);
 				return;
 			}
+			if (verdict === 'reset') {
+				// The socket this request arrived on went away while we waited;
+				// the daemon has already rejected it on close. Answering now
+				// would only buffer a stale-id error for the next socket.
+				bridgeLog(`D1: dropping request id ${id} (${method}): connection reset during the auth exchange`);
+				return;
+			}
 			if (!allowsRequests(verdict)) {
 				const why = verificationGate().reason() ?? (verdict === 'idle' ? 'no auth.challenge was received on this connection' : verdict);
 				bridgeLog(`D1: refusing ${method} (id ${id}): daemon not verified (${why})`);
@@ -548,11 +555,12 @@ const AUTH_STATE_KEY = '__claude_mcp_auth_state__';
 const VERIFICATION_GATE_KEY = '__claude_mcp_verification_gate__';
 const UNVERIFIED_TOAST_KEY = '__claude_mcp_unverified_toast_shown__';
 // How long the whole exchange (token read, our answer, the daemon's auth.ok)
-// may take from the moment the challenge arrives. The real daemon answers
-// within the same event-loop turn and the token read is a local file; 5 s is
-// generous for a busy machine and short enough that a silent rogue (or a
-// hung token read) is flagged promptly.
-const DAEMON_AUTH_OK_TIMEOUT_MS = 5_000;
+// may take from the moment the challenge arrives. Field record: every
+// genuine handshake completes in under 10 ms, so 15 s is a very generous
+// allowance for a busy EasyEDA main process or daemon; a silent rogue is
+// still flagged well within a human's attention span. An overrun is not
+// fatal anyway: a valid auth.ok that lands later upgrades the verdict.
+const DAEMON_AUTH_OK_TIMEOUT_MS = 15_000;
 
 function verificationGate(): VerificationGate {
 	const g = globalThis as any;
@@ -560,9 +568,21 @@ function verificationGate(): VerificationGate {
 		g[VERIFICATION_GATE_KEY] = createVerificationGate({
 			timeoutMs: DAEMON_AUTH_OK_TIMEOUT_MS,
 			onUnverified: warnUnverifiedDaemonOnce,
+			onVerifiedLate: announceVerifiedLate,
 		});
 	}
 	return g[VERIFICATION_GATE_KEY] as VerificationGate;
+}
+
+function announceVerifiedLate(earlierReason: string | null): void {
+	bridgeLog(`daemon verified via hmac-v1 mutual auth (late; earlier verdict was: ${earlierReason ?? 'none'}); requests resume`);
+	try {
+		eda.sys_Message.showToastMessage(
+			'Claude bridge daemon verified (the earlier warning was a slow handshake, not a rogue). Requests resume.',
+			ESYS_ToastMessageType.SUCCESS,
+			6,
+		);
+	} catch { /* toast is best-effort */ }
 }
 
 function resetDaemonAuthState(): void {
@@ -677,7 +697,7 @@ function handleAuthOk(mac: unknown): void {
 	hmacSha256Hex(state.token, daemonMacMessage(state.clientNonce, state.serverNonce))
 		.then((expected) => {
 			const ok = mac === expected;
-			if (ok) bridgeLog('daemon verified via hmac-v1 mutual auth');
+			if (ok && gate.state() === 'pending') bridgeLog('daemon verified via hmac-v1 mutual auth');
 			gate.authOkChecked(ok);
 		})
 		.catch(() => {
