@@ -32,9 +32,11 @@ interface Harness {
 
 // Random port per test so a stale daemon leaked from a prior crashed run
 // (which would hold a deterministic sequential port) can't predictably block
-// subsequent test runs. Range chosen to avoid common dev-server ports.
+// subsequent test runs. Range chosen to avoid common dev-server ports, and to
+// stay below 49152: Windows reserves blocks of its dynamic range for Hyper-V
+// and NAT, and binding one fails with EACCES (seen on GitHub's Windows runner).
 function nextPort(): number {
-	return 30000 + Math.floor(Math.random() * 20000);
+	return 20000 + Math.floor(Math.random() * 10000);
 }
 
 async function startDaemon(opts: { idleExitSec?: number; env?: Record<string, string> } = {}): Promise<Harness> {

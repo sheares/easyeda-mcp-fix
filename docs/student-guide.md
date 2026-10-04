@@ -147,6 +147,7 @@ Claude can change and delete things in your design. A few habits keep that safe:
 | No `mcp__easyeda__` tools, or `/pcb-lint` says the bridge is missing | The server must be registered as `easyeda` (step 4). Restart Claude Code after adding it. |
 | `/pcb-lint` not recognised | Check `~/.claude/skills/pcb-lint/SKILL.md` exists (Windows: `dir $HOME\.claude\skills\pcb-lint`), then restart Claude Code. |
 | Calls time out on a big project | Raise the timeout in step 4 (for example `EDA_REQUEST_TIMEOUT_MS=300000`) and re-add the server. |
+| Windows: never connects, and `$HOME\.easyeda-mcp\bridge.log` shows `listen EACCES` on port 16168 | Windows has reserved that port (it happens with Hyper-V, WSL or Docker installed). Check with `netsh interface ipv4 show excludedportrange protocol=tcp`. Restarting the Windows NAT service in an administrator PowerShell usually frees it: `net stop winnat`, then `net start winnat`. Ask your lecturer if unsure. |
 | Windows: a backup or "git" error on an edit | Install [Git for Windows](https://git-scm.com/download/win), then restart Claude Code. Risky edits refuse to run without a backup. |
 | Claude edited the wrong document | Ask it to check `editor_get_open_tabs` and `list_instances` first, and name the sheet or board you mean. |
 | `server_info` shows `versionMismatch: true` after an update | Restart Claude Code, then ask Claude to run `bridge_restart`. |

@@ -18,7 +18,8 @@ const child = spawn(process.execPath, [server], {
 		...process.env,
 		EDA_BRIDGE_STATE_DIR: stateDir,
 		EDA_BACKUP_DIR: join(stateDir, 'backup'),
-		EDA_WS_PORT: String(30000 + Math.floor(Math.random() * 20000)),
+		// below 49152: Windows reserves parts of its dynamic port range
+		EDA_WS_PORT: String(20000 + Math.floor(Math.random() * 10000)),
 	},
 	stdio: ['pipe', 'pipe', 'pipe'],
 	windowsHide: true,
