@@ -413,10 +413,11 @@ test('singleton: second daemon on same UDS exits 0', async () => {
 			env, stdio: ['ignore', 'pipe', 'pipe'],
 		});
 
-		const exitCode = await new Promise<number | null>((resolve) => {
-			second.once('exit', (code) => resolve(code));
-			setTimeout(() => { second.kill(); resolve(-1); }, 5000);
-		});
+		// Same 15 s cold-start budget as startDaemon: ts-node alone can take
+		// over 5 s on a busy CI runner (seen on macOS), before the singleton
+		// check even runs.
+		const exitCode = await waitForExit(second, 15000);
+		if (exitCode === null) second.kill();
 		assert.equal(exitCode, 0, 'second daemon should exit cleanly when one is already running');
 	} finally {
 		await h.cleanup();
