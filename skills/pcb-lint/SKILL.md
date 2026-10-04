@@ -12,7 +12,7 @@ It is a second pair of eyes, not a sign-off. It catches the common, expensive mi
 ## What is in this folder
 
 - `SKILL.md` (this file): the operational rules you follow.
-- `scripts/checks/{sch,pcb}_*.py`: a Python reference implementation of 25 of the 26 checks, unit-tested against mock MCP payloads (`tests/`, 185 tests). When a rule below is ambiguous, read the Python. If the Python and this file disagree, the Python is the truth, except for the two known issues listed under PCB-14 and PCB-20.
+- `scripts/checks/{sch,pcb}_*.py`: a Python reference implementation of 25 of the 26 checks, unit-tested against mock MCP payloads (`tests/`, 189 tests). When a rule below is ambiguous, read the Python. If the Python and this file disagree, the Python is the truth.
 - `scripts/config.example.json`: a template for the optional per-board config.
 
 The Python is a test harness and reference, **not** the runner. You are the runner.
@@ -158,13 +158,13 @@ Any primitive with `|x|` or `|y|` over 1,000,000 mil (about 25 m) means a mm/mil
 Read `solderMaskAndPasteMaskExpansion.{topSolderMask, bottomSolderMask}` on pads. **The unit is 1/100 inch, so 1 unit = 10 mil** (not mm). Convert with `value × 10 = mil` or `value × 0.254 = mm`. Typical expansion is 2 to 5 mil per side, so raw values are usually 0.2 to 0.5; if you compute more than 15 mil you have probably multiplied by 39.37 by mistake.
 - Under 1 mil: **warn** (mask may cover the pad).
 - Over 6 mil: **info** (bridging risk on fine-pitch parts). The threshold is not pitch-aware yet.
-- **Known issue:** the Python modules `pcb_14_soldermask_expansion.py` and `pcb_20_mask_dam_width.py` still treat this value as mm. Apply the `× 10` conversion yourself; do not trust those two modules' numbers.
+- **Unit ambiguity:** the Python converts `× 10` to mil (shared helper in `scripts/checks/types.py`) and treats a raw value above 1.5 (over 15 mil) as unit-ambiguous, because one real footprint (an SOD-323 diode) returned `2` where plain mil was the only plausible reading. PCB-14 does not claim a bridging risk for those pads; it emits one info finding listing them with both readings and asks you to confirm the expansion in EasyEDA's pad properties.
 
 ### PCB-18: Via aspect ratio (error)
 `board_thickness / holeDiameter ≤ 10`. Default board thickness 1.6 mm; override `board_thickness_mm` in config.
 
 ### PCB-20: Solder-mask dam on fine-pitch parts (error)
-For adjacent pads on the same copper layer, `dam = gap - (mask_expansion_1 + mask_expansion_2)`, where gap is the edge-to-edge distance. If the dam is under `pcb_mask_dam_min_mm` (default **0.10 mm**; use 0.15 mm for coloured masks): **error**. Below this, JLCPCB removes the dam without warning and the pads can bridge during reflow. Use the `× 10` mask-unit conversion from PCB-14.
+For adjacent pads on the same copper layer, `dam = gap - (mask_expansion_1 + mask_expansion_2)`, where gap is the edge-to-edge distance. If the dam is under `pcb_mask_dam_min_mm` (default **0.10 mm**; use 0.15 mm for coloured masks): **error**. Below this, JLCPCB removes the dam without warning and the pads can bridge during reflow. Use the `× 10` mask-unit conversion from PCB-14 (`× 0.254` for mm). Raw values above 1.5 are kept at the conservative `× 10` reading (the smaller dam) and the finding message names those pads as unit-ambiguous so you can check them.
 - Source: JLCPCB PCB capabilities, solder mask section (minimum mask bridge 0.1 mm, green, 1 oz).
 - Limits: rotated (non-axis-aligned) pad pairs are skipped; round pads are treated as their bounding box (conservative).
 

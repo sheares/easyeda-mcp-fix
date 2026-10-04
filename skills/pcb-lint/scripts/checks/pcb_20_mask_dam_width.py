@@ -50,7 +50,7 @@ import math
 from typing import Any
 
 from .base import Check, Finding, register
-from .types import Layer, MIL_TO_MM, MM_TO_MIL
+from .types import Layer, MIL_TO_MM, MM_TO_MIL, mask_raw_is_ambiguous, mask_raw_to_mm
 
 # Default threshold (JLCPCB green 1 oz, 2026-08-09).
 _DEFAULT_MIN_DAM_MM = 0.10
@@ -87,8 +87,8 @@ def _pad_dims(pad: dict) -> tuple[float, float]:
     return 0.0, 0.0
 
 
-def _mask_expansion_mm(pad: dict, layer: int) -> float:
-    """Return mask expansion in mm for the relevant side of a pad.
+def _mask_expansion_raw(pad: dict, layer: int) -> float:
+    """Return the raw MCP mask expansion value (1/100 inch units) for the relevant side.
 
     MULTI-layer (THT) pads use the top-side expansion as the canonical value;
     THT pads have the same dam concern on both sides.
@@ -102,6 +102,11 @@ def _mask_expansion_mm(pad: dict, layer: int) -> float:
         # TOP or MULTI
         v = exp.get("topSolderMask", 0.0)
     return float(v) if v is not None else 0.0
+
+
+def _mask_expansion_mm(pad: dict, layer: int) -> float:
+    """Return mask expansion in mm (raw MCP value x 0.254; see types.py)."""
+    return mask_raw_to_mm(_mask_expansion_raw(pad, layer))
 
 
 def _axis_aligned_gap_mm(
@@ -167,6 +172,7 @@ class PcbMaskDamWidth(Check):
                 layer_groups.setdefault(layer, []).append(pad)
 
         violations: list[str] = []
+        ambiguous_ids: list[str] = []
         # Pre-compute threshold in mils once (used in per-pair proximity ceiling).
         _gap_threshold_mil = _GAP_THRESHOLD_MM * MM_TO_MIL
 
@@ -207,6 +213,9 @@ class PcbMaskDamWidth(Check):
                     if dam_mm < min_dam_mm:
                         id1 = p1.get("primitiveId") or "?"
                         id2 = p2.get("primitiveId") or "?"
+                        for pid, pp in ((id1, p1), (id2, p2)):
+                            if mask_raw_is_ambiguous(_mask_expansion_raw(pp, layer)) and pid not in ambiguous_ids:
+                                ambiguous_ids.append(pid)
                         violations.append(
                             f"pads {id1}/{id2}: dam={dam_mm:.3f} mm "
                             f"(gap={gap_mm:.3f} mm, exp={exp1:.3f}+{exp2:.3f} mm)"
@@ -214,6 +223,13 @@ class PcbMaskDamWidth(Check):
 
         findings: list[dict] = []
         if violations:
+            amb_note = ""
+            if ambiguous_ids:
+                amb_note = (
+                    f" Unit-ambiguous mask expansion (raw value above 1.5, read as x10 "
+                    f"worst case) on pad(s): {', '.join(ambiguous_ids[:10])}; "
+                    "confirm the expansion in EasyEDA's pad properties."
+                )
             findings.append(
                 Finding(
                     check_id=self.id,
@@ -222,6 +238,7 @@ class PcbMaskDamWidth(Check):
                         f"PCB-20: {len(violations)} pad pair(s) have mask dam "
                         f"< {min_dam_mm:.2f} mm — fab will silently delete the dam, "
                         "causing solder bridges on fine-pitch parts."
+                        + amb_note
                     ),
                     offending_ids=violations[:20],
                     suggestion=(

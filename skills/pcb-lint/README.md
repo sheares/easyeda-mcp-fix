@@ -43,7 +43,7 @@ Copy `scripts/config.example.json` to your project folder as `pcb-lint.config.js
 
 - `SKILL.md`: the rules Claude follows. Read it to see exactly what each check looks for.
 - `scripts/checks/`: a Python reference implementation of 25 checks (SCH-12 is Claude-only for now).
-- `tests/`: 185 pytest tests against mock MCP payloads. You only need Python if you want to run or extend these:
+- `tests/`: 189 pytest tests against mock MCP payloads. You only need Python if you want to run or extend these:
 
 ```bash
 cd ~/.claude/skills/pcb-lint
@@ -54,4 +54,4 @@ pytest tests/
 
 ## Limits
 
-It is a second pair of eyes, not a sign-off. Always run EasyEDA's own DRC, read the datasheets for your parts, and eyeball the silkscreen in a PDF export. Known gaps are listed in `SKILL.md` (PCB-14 and PCB-20 Python modules use the wrong mask unit; cross-layer coupling is not automated; antenna zones are circle or rectangle only).
+It is a second pair of eyes, not a sign-off. Always run EasyEDA's own DRC, read the datasheets for your parts, and eyeball the silkscreen in a PDF export. Known gaps are listed in `SKILL.md` (cross-layer coupling is not automated; antenna zones are circle or rectangle only).

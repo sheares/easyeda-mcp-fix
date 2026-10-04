@@ -257,6 +257,36 @@ DEFAULT_BOARD_THICKNESS_MM = 1.6
 MM_TO_MIL = 39.37
 MIL_TO_MM = 1 / MM_TO_MIL
 
+# Pad solder-mask expansion (pad.solderMaskAndPasteMaskExpansion.{top,bottom}SolderMask)
+# is NOT in mil or mm. EasyEDA Pro's MCP returns it in units of 1/100 inch:
+# 1 unit = 10 mil = 0.254 mm. Verified on a real board: the UI showed an expansion
+# of 0.051 mm while the MCP returned topSolderMask = 0.2 (0.2 x 0.254 = 0.0508 mm).
+# Typical real raw values are 0.2 to 0.5 (2 to 5 mil). Pad sizes, holes and x/y in
+# the same struct ARE in mil; the mask field is the odd one out.
+MASK_UNIT_MIL = 10.0
+MASK_UNIT_MM = 0.254
+
+# One real footprint (SOD-323, JLC C191023) returned topSolderMask = 2, which is an
+# implausible 20 mil under the x10 rule but a normal 2 mil read as plain mil. So the
+# unit may vary between footprints. Raw values above this are "unit-ambiguous"
+# (> 15 mil under x10); checks keep the x10 reading but flag the pad for a human.
+MASK_AMBIGUOUS_RAW = 1.5
+
+
+def mask_raw_to_mil(raw: float) -> float:
+    """Convert a raw MCP solder-mask expansion value to mil (x10 rule)."""
+    return float(raw) * MASK_UNIT_MIL
+
+
+def mask_raw_to_mm(raw: float) -> float:
+    """Convert a raw MCP solder-mask expansion value to mm (x0.254 rule)."""
+    return float(raw) * MASK_UNIT_MM
+
+
+def mask_raw_is_ambiguous(raw: float) -> bool:
+    """True if the raw value is too large to be a plausible x10 expansion."""
+    return float(raw) > MASK_AMBIGUOUS_RAW
+
 
 class RealVia(TypedDict, total=False):
     primitiveId: str
