@@ -199,7 +199,9 @@ Two tool families are worth calling out for high-throughput workflows:
 - **`document_save_to_file` / `document_load_from_file`** do the same via
   local files (avoids MCP payload size limits).
 - **`project_export_file` / `project_import_file`** read and write
-  entire `.epro` projects as ZIP archives.
+  entire `.epro` projects as ZIP archives. A new-project import is saved to
+  the team/workspace of the project open in the target window (fixed in
+  v1.6.3: before that, EasyEDA silently rejected every new-project import).
 - **`sch_export_bom`** returns the schematic-side BOM as parsed rows
   (the source of truth for supplier metadata), handy for verifying BOM
   integrity after batch edits.

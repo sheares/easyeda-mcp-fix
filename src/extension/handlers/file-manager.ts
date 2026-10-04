@@ -1,3 +1,5 @@
+import { resolveImportSaveTo } from '../import-destination';
+
 async function fileToBase64(file: File): Promise<string> {
 	return new Promise((resolve, reject) => {
 		const reader = new FileReader();
@@ -90,18 +92,19 @@ export const fileManagerHandlers: Record<string, (params: Record<string, any>) =
 			params.fileName || 'import.epro',
 			'application/octet-stream',
 		);
-		const saveTo = params.existingProjectUuid
-			? { operation: 'Existing Project' as const, existingProjectUuid: params.existingProjectUuid }
-			: undefined;
-		const result = await eda.sys_FileManager.importProjectByProjectFile(
-			file,
-			params.fileType || 'EasyEDA Pro',
-			undefined,
-			saveTo,
-		);
+		const saveTo = await resolveImportSaveTo(params, {
+			currentProjectTeamUuid: async () => (await eda.dmt_Project.getCurrentProjectInfo())?.teamUuid,
+			currentTeamUuid: async () => (await eda.dmt_Team.getCurrentTeamInfo())?.uuid,
+		});
+		const fileType = params.fileType || 'EasyEDA Pro';
+		const result = await eda.sys_FileManager.importProjectByProjectFile(file, fileType, undefined, saveTo as any);
 		if (!result) {
-			throw new Error('Failed to import project file');
+			// EasyEDA gives no reason, so report what was attempted
+			throw new Error(
+				`EasyEDA rejected the import (it gives no reason): ${file.name}, ${file.size} bytes, `
+				+ `fileType ${fileType}, saveTo ${JSON.stringify(saveTo)}`,
+			);
 		}
-		return result;
+		return { ...result, saveTo };
 	},
 };

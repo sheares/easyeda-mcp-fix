@@ -255,6 +255,8 @@ All internal files are human-readable newline-delimited JSON arrays.${WORKFLOW_H
 			annotations: ANN.DESTRUCTIVE,
 			description: `Import a project file (.epro) from a local path into EasyEDA Pro.
 Can import into an existing project (replacing its contents) or create a new project.
+A new project is saved to the same team/workspace as the project open in the target
+window (on the desktop client, the local projects folder); open any project there first.
 Supports EasyEDA Pro, Altium, KiCad, EAGLE, PADS, and LTspice formats.
 When importing into an existing project (existingProjectUuid set), a backup of the prior
 project state is taken automatically and committed to a local git-tracked repo — the
@@ -267,6 +269,12 @@ returned backup.sha references the pre-import state.${WORKFLOW_HINT}`,
 				]).optional().describe('Source format (default: EasyEDA Pro)'),
 				existingProjectUuid: z.string().optional().describe(
 					'UUID of existing project to import into. If omitted, creates a new project.',
+				),
+				newProjectName: z.string().optional().describe(
+					'Display name for a new project. If omitted, EasyEDA takes it from the file.',
+				),
+				newProjectOwnerTeamUuid: z.string().optional().describe(
+					'Team uuid to own a new project. If omitted, the open project\'s team is used.',
 				),
 			}),
 			handler: async ({ filePath, instance_id, existingProjectUuid, ...rest }) => {
