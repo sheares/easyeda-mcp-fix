@@ -25,6 +25,11 @@ schematics and PCBs, then lint a board before you order it.
 5. In EasyEDA, open a schematic or PCB and click **Claude → Connect Claude**.
    Then ask Claude to "check the EasyEDA connection", or run `/pcb-lint`.
 
+New to Claude Code? After step 1, open Claude Code in the `easyeda-mcp`
+folder and say "help me set this up". [`CLAUDE.md`](CLAUDE.md) tells Claude
+how to walk you through the rest, and the do's and don'ts it follows when
+editing your designs.
+
 | Platform | Status |
 |---|---|
 | macOS | Tested end to end (EasyEDA Pro desktop 3.2.149) |

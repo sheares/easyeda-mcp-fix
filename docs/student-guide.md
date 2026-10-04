@@ -55,7 +55,9 @@ Expand-Archive -Force easyeda-mcp.zip -DestinationPath $HOME
 dir $HOME\easyeda-mcp
 ```
 
-You should see `dist`, `skills`, `README.md` and a file ending in `.eext`. Leave this folder where it is; Claude Code runs the server from here.
+You should see `dist`, `skills`, `README.md`, `CLAUDE.md` and a file ending in `.eext`. Leave this folder where it is; Claude Code runs the server from here.
+
+**Want Claude to guide you from here?** Run `cd ~/easyeda-mcp` (Windows: `cd $HOME\easyeda-mcp`), then `claude`, and say "help me set this up". Claude reads `CLAUDE.md`, runs steps 4 and 5 for you once you approve, and tells you what to click in EasyEDA for step 3.
 
 (Prefer clicking? Open the [Releases page](https://github.com/sheares/easyeda-mcp-fix/releases/latest), download `easyeda-mcp.zip`, and unzip it into your home folder.)
 

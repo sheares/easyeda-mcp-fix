@@ -35,3 +35,4 @@ QA-*.md
 debug.log
 /skills/
 /.github/
+/CLAUDE.md
