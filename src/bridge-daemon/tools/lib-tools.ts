@@ -188,6 +188,62 @@ export function libTools(ctx: ToolContext): ToolDef[] {
 			},
 		},
 
+		// ─── lib_Footprint ────────────────────────────────────────────────────────
+
+		{
+			name: 'lib_footprint_get',
+			annotations: ANN.READ_ONLY,
+			description: 'Get a library footprint\'s metadata (uuid, library, name, classification, description) by UUID. Read the source itself by opening the footprint with lib_footprint_open_in_editor and calling document_get_source on the returned tabId.',
+			inputShape: withInstanceParam({
+				footprintUuid: z.string().describe('Footprint UUID'),
+				libraryUuid: z.string().optional().describe('Library UUID containing the footprint (defaults to the system library)'),
+			}),
+			handler: async ({ footprintUuid, libraryUuid, instance_id }) => {
+				const result = await ctx.sendToExtension('lib.footprint.get', { footprintUuid, libraryUuid, instance_id });
+				return { content: [{ type: 'text', text: JSON.stringify(result ?? null, null, 2) }] };
+			},
+		},
+
+		{
+			name: 'lib_footprint_open_in_editor',
+			annotations: ANN.NAV,
+			description: 'Open a library footprint in the EasyEDA editor as a tab. Returns the new tabId: use it as the document UUID for document_get_source / document_save_to_file. Only footprints in a personal, team or project library can be opened (system-library ones are refused).',
+			inputShape: withInstanceParam({
+				footprintUuid: z.string().describe('Footprint UUID'),
+				libraryUuid: z.string().describe('Library UUID containing the footprint (see lib_get_project_library_uuid / lib_get_personal_library_uuid)'),
+				splitScreenId: z.string().optional().describe('Split screen ID (defaults to last-focused split)'),
+			}),
+			handler: async ({ footprintUuid, libraryUuid, splitScreenId, instance_id }) => {
+				const result = await ctx.sendToExtension('lib.footprint.openInEditor', {
+					footprintUuid,
+					libraryUuid,
+					splitScreenId,
+					instance_id,
+				});
+				return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
+			},
+		},
+
+		{
+			name: 'lib_footprint_update_document_source',
+			annotations: ANN.DESTRUCTIVE,
+			description: 'Replace a library footprint\'s entire source. IRREVERSIBLE: no undo, and no backup snapshot is taken (library assets are not documents). Read and save the current source first (lib_footprint_open_in_editor + document_save_to_file). The footprint must live in a library you can write to (personal/team/project). Returns boolean success.',
+			inputShape: withInstanceParam({
+				footprintUuid: z.string().describe('Footprint UUID'),
+				libraryUuid: z.string().describe('Library UUID containing the footprint (see lib_get_project_library_uuid / lib_get_personal_library_uuid)'),
+				documentSource: z.string().describe('New footprint source (same format document_get_source returns for the open footprint)'),
+			}),
+			handler: async ({ footprintUuid, libraryUuid, documentSource, instance_id }) => {
+				const result = await ctx.sendToExtension('lib.footprint.updateDocumentSource', {
+					footprintUuid,
+					libraryUuid,
+					documentSource,
+					instance_id,
+				});
+				return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
+			},
+		},
+
 		// ─── lib_Device ───────────────────────────────────────────────────────────
 
 		{

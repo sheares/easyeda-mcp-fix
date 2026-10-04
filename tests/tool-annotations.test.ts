@@ -30,6 +30,7 @@ const MUST_BE_DESTRUCTIVE = [
 	'lib_symbol_delete',
 	'lib_device_delete',
 	'lib_symbol_update_document_source',
+	'lib_footprint_update_document_source',
 	'document_set_source',
 	'document_load_from_file',
 	'project_import_file',

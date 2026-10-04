@@ -86,6 +86,29 @@ export const libraryHandlers: Record<string, (params: Record<string, any>) => Pr
 		);
 	},
 
+	'lib.footprint.get': async (params) => {
+		return eda.lib_Footprint.get(params.footprintUuid, params.libraryUuid);
+	},
+
+	'lib.footprint.openInEditor': async (params) => {
+		const result = await eda.lib_Footprint.openInEditor(params.footprintUuid, params.libraryUuid, params.splitScreenId);
+		// Same contract as lib.symbol.openInEditor: a non-string result means EDA Pro would not open it.
+		if (typeof result !== 'string' || result.length === 0) {
+			throw new BridgeUserError(
+				`EDA Pro refused to open footprint ${params.footprintUuid} (library ${params.libraryUuid}) in the editor (returned ${JSON.stringify(result)}). System-library footprints cannot be opened this way; copy the footprint into a personal or project library first and open that copy.`,
+			);
+		}
+		return result;
+	},
+
+	'lib.footprint.updateDocumentSource': async (params) => {
+		return eda.lib_Footprint.updateDocumentSource(
+			params.footprintUuid,
+			params.libraryUuid,
+			params.documentSource,
+		);
+	},
+
 	'lib.getSystemLibraryUuid': async () => {
 		return eda.lib_LibrariesList.getSystemLibraryUuid();
 	},

@@ -1,6 +1,6 @@
 {
 	"name": "easyeda-agent-mcp-server",
-	"version": "1.6.3",
+	"version": "1.6.4",
 	"description": "Bug-fix fork of the EasyEDA Pro MCP bridge. Resolves silent BOM wipes, dead copper to SMD pads and five-minute netlist hangs.",
 	"private": true,
 	"license": "MIT",
