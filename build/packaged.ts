@@ -53,6 +53,9 @@ function main() {
 		}
 	}
 
+	// build/dist/ is gitignored, so a fresh clone has no output folder
+	fs.mkdirSync(__dirname + '/dist', { recursive: true });
+
 	const zip = new JSZip();
 	for (const file of fileList) {
 		zip.file(file, fs.createReadStream(__dirname + '/../' + file));
