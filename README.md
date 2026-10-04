@@ -7,6 +7,44 @@ taken to fab.
 Base: [`javawizard/easyeda-agent-mcp-server`](https://github.com/javawizard/easyeda-agent-mcp-server)
 (itself a fork of [`QuincySx/easyeda-agent-mcp-server`](https://github.com/QuincySx/easyeda-agent-mcp-server)).
 
+## Quick start (students start here)
+
+Connect Claude Code to EasyEDA Pro so Claude can read, check and edit your
+schematics and PCBs, then lint a board before you order it.
+
+**Follow the step-by-step [student guide](docs/student-guide.md).** In short:
+
+1. Download `easyeda-mcp.zip` from the [latest release](https://github.com/sheares/easyeda-mcp-fix/releases/latest)
+   and unzip it into your home folder. No build step needed.
+2. In EasyEDA Pro: **Advanced → Extension Manager → Import** the `.eext`,
+   then turn on **External Interactions** and **Show in top menu**.
+3. Register the server with Claude Code:
+   `claude mcp add --scope user easyeda -e EDA_REQUEST_TIMEOUT_MS=180000 -- node "$HOME/easyeda-mcp/dist/mcp-server/index.js"`
+4. Install the board checker: `cp -R ~/easyeda-mcp/skills/pcb-lint ~/.claude/skills/`
+5. In EasyEDA, open a schematic or PCB and click **Claude → Connect Claude**.
+   Then ask Claude to "check the EasyEDA connection", or run `/pcb-lint`.
+
+| Platform | Status |
+|---|---|
+| macOS | Tested (EasyEDA Pro desktop 3.2.149) |
+| Linux | Should work, untested |
+| Windows | Not yet: the bridge fails at start-up on native Windows. WSL2 untested. See the guide |
+
+### pcb-lint: a board checker skill
+
+[`skills/pcb-lint/`](skills/pcb-lint/) is a Claude Code skill that runs 26
+design-hygiene checks (12 schematic, 14 PCB) through this bridge and writes
+a scored report: regulator output against downstream abs-max, USB-C CC
+pull-downs, ESP32 strapping pins, first-flash power path, decoupling
+distance, annular ring, mask dams, copper-to-edge clearance, antenna
+keep-outs and more. Type `/pcb-lint` in Claude Code with a board open. See
+its [README](skills/pcb-lint/README.md) and [SKILL.md](skills/pcb-lint/SKILL.md).
+
+---
+
+The rest of this page is for developers: what the fork fixes, how it is
+secured, and how to build it.
+
 ## Why this fork exists
 
 The upstream `easyeda-agent-mcp-server` extension bridges Claude Code (and
@@ -55,7 +93,7 @@ Deliberate limits, kept honest:
 
 ## Security audit
 
-[`AUDIT.md`](AUDIT.md) documents the whole codebase across the three layers
+[`AUDIT.md`](docs/dev-notes/AUDIT.md) documents the whole codebase across the three layers
 (MCP server, bridge daemon, EDA Pro extension) with severity ratings.
 Seven criticals were identified; all seven are resolved on this branch.
 
@@ -94,20 +132,21 @@ across rebuilds while any MCP client is attached, so after a rebuild check
 `.eext` reinstall, so bump the version before rebuilding.
 
 Two QA passes on 2026-07-24
-([`QA-REPORT-2026-07-24.md`](QA-REPORT-2026-07-24.md),
-[`QA-DEEP-REPORT-2026-07-24.md`](QA-DEEP-REPORT-2026-07-24.md)) drove a
+([`QA-REPORT-2026-07-24.md`](docs/dev-notes/QA-REPORT-2026-07-24.md),
+[`QA-DEEP-REPORT-2026-07-24.md`](docs/dev-notes/QA-DEEP-REPORT-2026-07-24.md)) drove a
 further hardening round: document-switch verification before every routed
 operation, pre-write backups on bulk supplier swaps, MCP risk annotations
 on all ~100 tools, the mutual auth above, and assorted transport and
-correctness fixes. See [`HANDOVER-2026-07-24.md`](HANDOVER-2026-07-24.md)
+correctness fixes. See [`HANDOVER-2026-07-24.md`](docs/dev-notes/HANDOVER-2026-07-24.md)
 for the work-order trail. A third pass on 2026-08-23
-([`QA-REPORT-2026-08-23.md`](QA-REPORT-2026-08-23.md)) verified that round
+([`QA-REPORT-2026-08-23.md`](docs/dev-notes/QA-REPORT-2026-08-23.md)) verified that round
 live and produced v1.6.1: request gating on daemon verification, version
 reporting in `server_info`, in-place log rotation, and smaller fixes. A
 fourth pass on 2026-09-06
-([`QA-REPORT-2026-09-06.md`](QA-REPORT-2026-09-06.md)), after two weeks of
+([`QA-REPORT-2026-09-06.md`](docs/dev-notes/QA-REPORT-2026-09-06.md)), after two weeks of
 field use, produced v1.6.2: late-`auth.ok` recovery and a headless harness
-for the extension's request pipeline.
+for the extension's request pipeline. v1.6.3 fixed new-project imports and
+v1.6.4 added the library footprint tools.
 
 ### Environment variables
 
@@ -116,7 +155,7 @@ All knobs are daemon/server side; the extension has no environment access.
 | Variable | Default | Purpose |
 |---|---|---|
 | `EDA_BRIDGE_STATE_DIR` | `~/.easyeda-mcp` | State dir (UDS socket, pid file, ws-token, bridge.log) |
-| `EDA_WS_PORT` | `16168` | Daemon WS port. The extension always dials 16168 (it cannot see env vars), so changing this strands it — test use only |
+| `EDA_WS_PORT` | `16168` | Daemon WS port. The extension always dials 16168 (it cannot see env vars), so changing this strands it: test use only |
 | `EDA_WS_AUTH` | unset | `require` refuses WS connections that do not prove token knowledge |
 | `EDA_WS_ALLOW_ALL_ORIGINS` | unset | `1` disables the WS Origin allowlist. Debugging escape hatch only; the daemon logs a loud warning at startup and `server_info` reports it |
 | `EDA_BRIDGE_IDLE_EXIT_SEC` | `5` | Daemon exits this many seconds after the last MCP client disconnects (`0` = immediate) |
@@ -125,28 +164,37 @@ All knobs are daemon/server side; the extension has no environment access.
 | `EDA_BACKUP_DIR` | `~/.easyeda-mcp-backup` | Git-tracked backup repo for destructive operations |
 | `EDA_DISCOVERY_LOG` | `~/.easyeda-schema-discovery.jsonl` | Where unknown schema tags are logged for schema growth |
 
-## Install
+## Install from source
+
+Students: use the [release download](#quick-start-students-start-here)
+instead. This is for changing the code.
 
 ```bash
 git clone https://github.com/sheares/easyeda-mcp-fix.git
 cd easyeda-mcp-fix
 npm install
-npm test              # 199 tests
-npm run build         # produces build/dist/easyeda-agent-mcp-server_vN.N.N.eext
+npm test              # 205 tests
+npm run build         # produces dist/ and build/dist/easyeda-agent-mcp-server_vN.N.N.eext
 ```
 
-Then in EasyEDA Pro:
+Then in EasyEDA Pro (v3):
 
-1. **Settings → Extensions → Install** the built `.eext` from
-   `build/dist/`.
-2. Open the extension's page, tick **Allow interactive with external**
-   and **Show at header menu**.
-3. Click **Claude → Connect Claude** from the header menu.
+1. **Advanced → Extension Manager → Import** the built `.eext` from
+   `build/dist/`. (EasyEDA Pro v2: **Settings → Extensions → Extension
+   Manager → Import Extension**.)
+2. Select the extension and turn on **External Interactions** and
+   **Show in top menu**.
+3. Open a schematic or PCB and click **Claude → Connect Claude**.
 
-Point your MCP client (Claude Code or otherwise) at the
-`easyeda-agent-mcp-server` binary in `dist/mcp-server/`. The bridge
-daemon is spawned automatically on first tool call and listens on
-`127.0.0.1:16168`.
+Register the server with your MCP client. For Claude Code:
+
+```bash
+claude mcp add --scope user easyeda -- node "$(pwd)/dist/mcp-server/index.js"
+```
+
+The bridge daemon is spawned automatically on the first tool call and
+listens on `127.0.0.1:16168`. `dist/` is fully bundled (no
+`node_modules` needed at run time), which is what the release zip ships.
 
 Same-version reinstalls are a no-op in EasyEDA Pro. Bump the version in
 `extension.json` before rebuilding if you want your changes to take
@@ -170,9 +218,12 @@ src/
   bridge-daemon/ the WebSocket bridge between MCP server and extension
   extension/     the EasyEDA Pro extension (.eext), incl. bug-fix handlers
   lib/           schematic editing library (start at src/lib/README.md)
-docs/            .esch / .epcb / .epro file format reference
+skills/
+  pcb-lint/      Claude Code skill: board design-hygiene checks
+docs/            student guide, .esch / .epcb / .epro file format reference
+  dev-notes/     audit, QA reports and handover work orders
 examples/        working examples using the editing library
-tests/           199 tests (node --test, ts-node)
+tests/           205 tests (node --test, ts-node)
 ```
 
 ## Two distinct pieces

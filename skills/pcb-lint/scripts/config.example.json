@@ -1,0 +1,44 @@
+{
+  "class": 2,
+  "default_temp_rise_c": 10,
+  "copper_weight_oz": 1,
+  "board_thickness_mm": 1.6,
+  "strict": false,
+  "high_speed_nets": [
+    "USB_D_P",
+    "USB_D_N",
+    "MCU_XTAL_1",
+    "MCU_XTAL_2"
+  ],
+  "differential_pairs": [
+    [
+      "USB_D_P",
+      "USB_D_N"
+    ]
+  ],
+  "per_net_current_a": {
+    "+5V": 2.0,
+    "+3V3": 1.5,
+    "GND": 3.5,
+    "MOTOR_A_HI": 1.2
+  },
+  "pcb_edge_clearance_mil": 8,
+  "pcb_mask_dam_min_mm": 0.1,
+  "antenna_keepouts": [
+    {
+      "name": "ESP32-C3 chip antenna",
+      "shape": "circle",
+      "x_mm": 25.0,
+      "y_mm": 10.0,
+      "radius_mm": 15.0
+    },
+    {
+      "name": "LoRa module antenna area",
+      "shape": "rect",
+      "x_mm": 5.0,
+      "y_mm": 40.0,
+      "w_mm": 20.0,
+      "h_mm": 5.0
+    }
+  ]
+}

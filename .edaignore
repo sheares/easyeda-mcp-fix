@@ -33,3 +33,5 @@ QA-*.md
 /tsconfig.extension.json
 .DS_Store
 debug.log
+/skills/
+/.github/

@@ -2,7 +2,7 @@
 
 **Status:** Phases 0, 1, 2, 3 all shipped. 18 checks total (7 SCH + 11 PCB), 72 pytest tests green, dogfooded end-to-end on Splitflap-v2-Wireless-v3 Board1 (schematic + PCB) 2026-07-20.
 
-**Runner architecture:** Option B (Claude in-session calls `mcp__easyeda__*` directly). The Python scaffold at `~/.claude/skills/pcb-lint/scripts/` is the reference implementation + regression harness; not the primary runner.
+**Runner architecture:** Option B (Claude in-session calls `mcp__easyeda__*` directly). The Python scaffold at `skills/pcb-lint/scripts/` is the reference implementation + regression harness; not the primary runner.
 
 **Author:** Claude, 2026-07-20 (initial draft through Phase 3 delivery all in one session).
 
@@ -44,7 +44,7 @@ Saved as separate feedback memories, load automatically on future PCB reviews:
 ## Why Option B (kept from v0.3 spec)
 
 The fork's mcp-server uses stdio transport (spawned as subprocess by the MCP client, not a WebSocket daemon). A second Python MCP client alongside Claude Code was doable but bought little for a solo-dev workflow. Option B removes the double-connection complexity and matches how most Claude Code skills work: SKILL.md instructs the model, model calls the MCP tools, model produces the output. The Python scaffold retains value as the pytest regression harness and as the reference implementation when a check's semantics look ambiguous from SKILL.md prose.
-**Sits under:** [PCB best practices](../../../../.claude/projects/-Users-benjaminxue-Documents-Claude-OS-Folder/memory/reference_pcb_best_practices.md) and the [design checkpoint protocol](../../../../.claude/projects/-Users-benjaminxue-Documents-Claude-OS-Folder/memory/feedback_design_checkpoint_protocol.md).
+**Sits under:** PCB best practices (author\'s private notes) and the design checkpoint protocol (author\'s private notes).
 
 ---
 
@@ -64,7 +64,7 @@ Non-goal: replace human judgement on grouping, hierarchy, aesthetics, or DFM dec
 
 **Preconditions:**
 - EasyEDA Pro is running with the target board open.
-- Fork MCP bridge is live (verify with `server_info` ping; if not, prompt "Connect Claude" in EDA Pro per [Splitflap → EDA Pro bridge](../../../../.claude/projects/-Users-benjaminxue-Documents-Claude-OS-Folder/memory/feedback_splitflap_edapro_bridge.md)).
+- Fork MCP bridge is live (verify with `server_info` ping; if not, prompt "Connect Claude" in EDA Pro per Splitflap → EDA Pro bridge (author\'s private notes)).
 
 ---
 
@@ -131,7 +131,7 @@ Grouped by which gate they enforce. Every check names its MCP dependency so we k
 
 | Rule | Why skipped |
 |---|---|
-| Silk-over-pad exact overlap | Silk not queryable in EasyEDA MCP; needs PDF eyeball ([known bug](../../../../.claude/projects/-Users-benjaminxue-Documents-Claude-OS-Folder/memory/reference_easyeda_mcp_bugs.md)). Output: prompt user to PDF-export + upload. |
+| Silk-over-pad exact overlap | Silk not queryable in EasyEDA MCP; needs PDF eyeball (known bug (author\'s private notes)). Output: prompt user to PDF-export + upload. |
 | Traces crossing plane splits | Requires plane-void detection; non-trivial. Consider for v2. |
 | Return-path integrity | Requires layer-aware simulation; out of scope. |
 | Rail-continuity at bring-up | Physical DMM check; skill can only remind. |
@@ -209,7 +209,7 @@ Each check ships with a fixture board that deliberately violates the rule, plus 
 ## Implementation phasing
 
 **Phase 0: skill scaffold**
-- Create `~/.claude/skills/pcb-lint/` with SKILL.md + a **Python** runner. Python is fixed: MCP client libraries are more mature there, and it stays out of the fork's Node ecosystem so client-side lint iteration doesn't collide with server-side changes.
+- Create `skills/pcb-lint/` with SKILL.md + a **Python** runner. Python is fixed: MCP client libraries are more mature there, and it stays out of the fork's Node ecosystem so client-side lint iteration doesn't collide with server-side changes.
 - SKILL.md declares trigger phrases and describes purpose; runner uses the standard MCP Python client to call fork primitives.
 - Scaffold in the paired fixture directory (`tests/fixtures/`) and empty `pytest` harness.
 
@@ -237,7 +237,7 @@ Each check ships with a fixture board that deliberately violates the rule, plus 
 
 - **Config file location.** Per-board `pcb-lint.config.json`, versioned next to the `.epro` file. Rationale: config travels with the design and is diffable per board revision.
 - **Runner platform.** Python (see Phase 0).
-- **Silk-over-pad handover.** Manual, per existing [silk check memo](../../../../.claude/projects/-Users-benjaminxue-Documents-Claude-OS-Folder/memory/project_splitflap_silk_check_pending.md). Skill emits a `skipped: needs manual` finding and prompts PDF export.
+- **Silk-over-pad handover.** Manual, per existing silk check memo (author\'s private notes). Skill emits a `skipped: needs manual` finding and prompts PDF export.
 
 ## Open questions before build
 
