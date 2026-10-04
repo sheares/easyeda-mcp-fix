@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { readFile, writeFile, mkdir } from 'node:fs/promises';
-import { dirname } from 'node:path';
+import { basename, dirname } from 'node:path';
 import type { ToolDef, ToolContext } from '../types';
 import { withInstanceParam, withDocumentParam } from './query-params';
 import { backupDocument, backupProject, formatBackupSummary, type BackupResult } from '../backup';
@@ -280,7 +280,8 @@ returned backup.sha references the pre-import state.${WORKFLOW_HINT}`,
 			handler: async ({ filePath, instance_id, existingProjectUuid, ...rest }) => {
 				const raw = await readFile(filePath);
 				const data = raw.toString('base64');
-				const fileName = filePath.split('/').pop() || 'import.epro';
+				// basename also splits Windows backslash paths; split('/') passed the whole path
+				const fileName = basename(filePath) || 'import.epro';
 
 				let backup: BackupResult | undefined;
 				if (existingProjectUuid) {

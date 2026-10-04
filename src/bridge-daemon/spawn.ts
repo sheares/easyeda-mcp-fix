@@ -85,6 +85,8 @@ export async function ensureDaemonRunning(): Promise<void> {
 
 	const child = spawn(process.execPath, [entry], {
 		detached: true,
+		// A detached child on Windows otherwise opens its own console window.
+		windowsHide: true,
 		stdio: ['ignore', logFd, logFd],
 		env: process.env,
 	});

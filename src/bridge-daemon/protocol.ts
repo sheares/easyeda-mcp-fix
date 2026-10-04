@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 
@@ -7,8 +8,25 @@ export function stateDir(): string {
 	return process.env.EDA_BRIDGE_STATE_DIR || join(homedir(), '.easyeda-mcp');
 }
 
-export function socketPath(): string {
-	return join(stateDir(), 'bridge.sock');
+/**
+ * True where the daemon's local socket is a Windows named pipe rather than a
+ * file. Pipes have no file to chmod, stat, watch or unlink, and vanish when
+ * their owning process exits, so the file-based safety nets are skipped there.
+ */
+export function usesNamedPipe(platform: NodeJS.Platform = process.platform): boolean {
+	return platform === 'win32';
+}
+
+export function socketPath(dir: string = stateDir(), platform: NodeJS.Platform = process.platform): string {
+	if (usesNamedPipe(platform)) {
+		// Node's net module only takes \\.\pipe\ names on Windows. Key the name
+		// on the state dir so each user (and each test's EDA_BRIDGE_STATE_DIR)
+		// gets its own daemon, as the per-dir socket file does elsewhere.
+		// Windows paths are case-insensitive, so fold case before hashing.
+		const key = createHash('sha256').update(dir.toLowerCase()).digest('hex').slice(0, 16);
+		return `\\\\.\\pipe\\easyeda-mcp-bridge-${key}`;
+	}
+	return join(dir, 'bridge.sock');
 }
 
 export function pidPath(): string {

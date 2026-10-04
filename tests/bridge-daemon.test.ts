@@ -18,6 +18,7 @@ import { tmpdir } from 'node:os';
 import { join, resolve as resolvePath } from 'node:path';
 import { WebSocket } from 'ws';
 import { daemonMacMessage, extMacMessage } from '../src/bridge-daemon/auth-mac';
+import { socketPath, usesNamedPipe } from '../src/bridge-daemon/protocol';
 
 const DAEMON_SRC = resolvePath(__dirname, '..', 'src', 'bridge-daemon', 'index.ts');
 
@@ -39,7 +40,7 @@ function nextPort(): number {
 async function startDaemon(opts: { idleExitSec?: number; env?: Record<string, string> } = {}): Promise<Harness> {
 	const stateDir = await mkdtemp(join(tmpdir(), 'easyeda-bridge-test-'));
 	const wsPort = nextPort();
-	const sockPath = join(stateDir, 'bridge.sock');
+	const sockPath = socketPath(stateDir);
 
 	const env = {
 		...process.env,
@@ -498,7 +499,10 @@ async function waitForExit(daemon: ChildProcess, timeoutMs: number): Promise<num
 	});
 }
 
-test('UDS monitor: daemon self-terminates when its socket file is unlinked', async () => {
+// Windows uses a named pipe: there is no socket file to unlink, and no monitor.
+const NO_SOCKET_FILE = usesNamedPipe() && 'named pipe on Windows: no socket file to remove';
+
+test('UDS monitor: daemon self-terminates when its socket file is unlinked', { skip: NO_SOCKET_FILE }, async () => {
 	const h = await startDaemon();
 	try {
 		await unlink(h.sockPath);
@@ -509,7 +513,7 @@ test('UDS monitor: daemon self-terminates when its socket file is unlinked', asy
 	}
 });
 
-test('UDS monitor: daemon self-terminates when its socket file is replaced with a different inode', async () => {
+test('UDS monitor: daemon self-terminates when its socket file is replaced with a different inode', { skip: NO_SOCKET_FILE }, async () => {
 	const h = await startDaemon();
 	try {
 		// Swap the live socket for a regular file at the same path so the inode

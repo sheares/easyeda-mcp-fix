@@ -25,6 +25,7 @@ import { createConnection } from 'node:net';
 import { randomBytes, createHash, createHmac, timingSafeEqual } from 'node:crypto';
 import {
 	socketPath,
+	usesNamedPipe,
 	pidPath,
 	logPath,
 	stateDir,
@@ -696,13 +697,19 @@ function startUdsServer(sockPath: string): Promise<void> {
 
 		server.on('error', (err) => reject(err));
 		server.listen(sockPath, () => {
-			// Restrict the socket to the owning user. The state dir is already
-			// 0700, but lock the socket file too as defence in depth (some
-			// platforms gate UDS connect on the socket's own mode). Best-effort:
-			// a chmod failure shouldn't stop the daemon from serving.
-			chmod(sockPath, 0o600).catch((err) => log('chmod socket failed:', err));
 			log(`UDS listening at ${sockPath}`);
-			startUdsFileMonitor(sockPath);
+			// A Windows named pipe has no file: nothing to chmod, and nothing
+			// that can be unlinked out from under us, so no monitor either.
+			// (Its stat would open a client connection to the pipe, and a busy
+			// pipe would read as "disappeared" and kill a healthy daemon.)
+			if (!usesNamedPipe()) {
+				// Restrict the socket to the owning user. The state dir is already
+				// 0700, but lock the socket file too as defence in depth (some
+				// platforms gate UDS connect on the socket's own mode). Best-effort:
+				// a chmod failure shouldn't stop the daemon from serving.
+				chmod(sockPath, 0o600).catch((err) => log('chmod socket failed:', err));
+				startUdsFileMonitor(sockPath);
+			}
 			resolve();
 		});
 
@@ -784,8 +791,12 @@ async function bindUdsWithSingletonCheck(): Promise<void> {
 		process.exit(0);
 	}
 
+	// A named pipe dies with its owner, so on Windows there is no stale file
+	// to clear; the retry alone covers an owner that exited mid-probe.
 	log(`Stale socket at ${sockPath} — unlinking and retrying.`);
-	try { await unlink(sockPath); } catch { /* noop */ }
+	if (!usesNamedPipe()) {
+		try { await unlink(sockPath); } catch { /* noop */ }
+	}
 	await startUdsServer(sockPath);
 }
 
@@ -835,7 +846,8 @@ function shutdown(code: number): void {
 		// Await the unlinks — exiting on the next line would abandon them,
 		// leaving a stale socket/pid file that costs every restart an
 		// EADDRINUSE → probe → unlink → rebind cycle.
-		void Promise.allSettled([unlink(socketPath()), unlink(pidPath()), unlink(wsTokenPath())])
+		const files = usesNamedPipe() ? [pidPath(), wsTokenPath()] : [socketPath(), pidPath(), wsTokenPath()];
+		void Promise.allSettled(files.map((f) => unlink(f)))
 			.then(() => process.exit(code));
 	};
 
