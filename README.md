@@ -18,17 +18,20 @@ schematics and PCBs, then lint a board before you order it.
    and unzip it into your home folder. No build step needed.
 2. In EasyEDA Pro: **Advanced → Extension Manager → Import** the `.eext`,
    then turn on **External Interactions** and **Show in top menu**.
-3. Register the server with Claude Code:
-   `claude mcp add --scope user easyeda -e EDA_REQUEST_TIMEOUT_MS=180000 -- node "$HOME/easyeda-mcp/dist/mcp-server/index.js"`
-4. Install the board checker: `cp -R ~/easyeda-mcp/skills/pcb-lint ~/.claude/skills/`
+3. Register the server with Claude Code (Windows: same command in
+   PowerShell with `\` in the path):
+   `claude mcp add --scope user easyeda node "$HOME/easyeda-mcp/dist/mcp-server/index.js" -e EDA_REQUEST_TIMEOUT_MS=180000`
+4. Install the board checker: copy `skills/pcb-lint` into `~/.claude/skills/`.
 5. In EasyEDA, open a schematic or PCB and click **Claude → Connect Claude**.
    Then ask Claude to "check the EasyEDA connection", or run `/pcb-lint`.
 
 | Platform | Status |
 |---|---|
-| macOS | Tested (EasyEDA Pro desktop 3.2.149) |
-| Linux | Should work, untested |
-| Windows | Not yet: the bridge fails at start-up on native Windows. WSL2 untested. See the guide |
+| macOS | Tested end to end (EasyEDA Pro desktop 3.2.149) |
+| Windows 10/11 | Supported from v1.6.5 (native, PowerShell). Server and bridge tested in CI; a full EasyEDA session on Windows still to be confirmed |
+| Linux | Server and bridge tested in CI; EasyEDA side untested |
+
+[![test](https://github.com/sheares/easyeda-mcp-fix/actions/workflows/test.yml/badge.svg)](https://github.com/sheares/easyeda-mcp-fix/actions/workflows/test.yml)
 
 ### pcb-lint: a board checker skill
 
@@ -145,8 +148,9 @@ reporting in `server_info`, in-place log rotation, and smaller fixes. A
 fourth pass on 2026-09-06
 ([`QA-REPORT-2026-09-06.md`](docs/dev-notes/QA-REPORT-2026-09-06.md)), after two weeks of
 field use, produced v1.6.2: late-`auth.ok` recovery and a headless harness
-for the extension's request pipeline. v1.6.3 fixed new-project imports and
-v1.6.4 added the library footprint tools.
+for the extension's request pipeline. v1.6.3 fixed new-project imports,
+v1.6.4 added the library footprint tools, and v1.6.5 made the bridge run on
+native Windows (a named pipe in place of the Unix socket file).
 
 ### Environment variables
 
@@ -154,7 +158,7 @@ All knobs are daemon/server side; the extension has no environment access.
 
 | Variable | Default | Purpose |
 |---|---|---|
-| `EDA_BRIDGE_STATE_DIR` | `~/.easyeda-mcp` | State dir (UDS socket, pid file, ws-token, bridge.log) |
+| `EDA_BRIDGE_STATE_DIR` | `~/.easyeda-mcp` | State dir (UDS socket, pid file, ws-token, bridge.log). On Windows the socket is a named pipe, `\\.\pipe\easyeda-mcp-bridge-<hash of this dir>` |
 | `EDA_WS_PORT` | `16168` | Daemon WS port. The extension always dials 16168 (it cannot see env vars), so changing this strands it: test use only |
 | `EDA_WS_AUTH` | unset | `require` refuses WS connections that do not prove token knowledge |
 | `EDA_WS_ALLOW_ALL_ORIGINS` | unset | `1` disables the WS Origin allowlist. Debugging escape hatch only; the daemon logs a loud warning at startup and `server_info` reports it |
@@ -173,7 +177,8 @@ instead. This is for changing the code.
 git clone https://github.com/sheares/easyeda-mcp-fix.git
 cd easyeda-mcp-fix
 npm install
-npm test              # 205 tests
+npm test              # 208 tests
+npm run smoke         # after a build: starts the bundled server and a real bridge
 npm run build         # produces dist/ and build/dist/easyeda-agent-mcp-server_vN.N.N.eext
 ```
 
@@ -189,7 +194,7 @@ Then in EasyEDA Pro (v3):
 Register the server with your MCP client. For Claude Code:
 
 ```bash
-claude mcp add --scope user easyeda -- node "$(pwd)/dist/mcp-server/index.js"
+claude mcp add --scope user easyeda node "$(pwd)/dist/mcp-server/index.js"
 ```
 
 The bridge daemon is spawned automatically on the first tool call and
@@ -223,7 +228,7 @@ skills/
 docs/            student guide, .esch / .epcb / .epro file format reference
   dev-notes/     audit, QA reports and handover work orders
 examples/        working examples using the editing library
-tests/           205 tests (node --test, ts-node)
+tests/           208 tests (node --test, ts-node) + smoke-bundle.js
 ```
 
 ## Two distinct pieces

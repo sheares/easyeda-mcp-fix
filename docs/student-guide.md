@@ -2,10 +2,13 @@
 
 This guide gets you from nothing to Claude reading and editing your EasyEDA Pro schematics and PCBs, plus the `/pcb-lint` board checker. Allow 20 minutes the first time.
 
-**Tested on:** macOS, EasyEDA Pro desktop 3.2.149, Claude Code, extension v1.6.4.
+| Platform | Status |
+|---|---|
+| macOS | Tested end to end with EasyEDA Pro desktop 3.2.149 |
+| Windows 10/11 | Supported from v1.6.5. The server and bridge pass the full test suite on Windows automatically; a full run with EasyEDA on a Windows PC is still to be confirmed, so please report how it goes. Use PowerShell, not WSL |
+| Linux | Server and bridge tested automatically; untested with EasyEDA's Linux client |
 
-> **Windows:** not supported yet. The bridge fails at start-up on native Windows (it uses a Unix-style socket); a fix is planned. WSL2 may work but is untested, see [the note at the end](#windows-and-linux).
-> **Linux:** should work (EasyEDA Pro has a Linux client) but is untested.
+Commands are given for **macOS/Linux (Terminal)** and **Windows (PowerShell)**. Run only the block for your computer.
 
 ## How it fits together
 
@@ -17,7 +20,7 @@ You install two things: an **extension** inside EasyEDA Pro, and an **MCP server
 
 ## 1. Check you have the basics
 
-Open **Terminal** and run each line. Each should print a version number.
+Open **Terminal** (Mac) or **PowerShell** (Windows: Start menu, type PowerShell) and run each line. Each should print a version number.
 
 ```bash
 node --version     # needs v20.5 or newer
@@ -26,19 +29,30 @@ claude --version   # Claude Code
 ```
 
 - No Node, or older than v20.5: install the **LTS** version from [nodejs.org](https://nodejs.org).
-- No git: on a Mac, running `git --version` offers to install it. Accept.
-- No Claude Code: follow your class's Claude Code setup sheet first.
+- No git: on a Mac, running `git --version` offers to install it. Accept. On Windows, install [Git for Windows](https://git-scm.com/download/win) with the default options.
+- No Claude Code: follow your class's Claude Code setup sheet first. **Windows:** for this tool, run Claude Code in PowerShell, not inside WSL: EasyEDA runs on Windows, so Claude needs to run there too.
 - **EasyEDA Pro desktop:** download from [easyeda.com/page/download](https://easyeda.com/page/download) (the Pro edition, free). Use the desktop app rather than the browser version.
 
 ## 2. Download the bridge
 
-Paste this into Terminal. It downloads the latest release and unpacks it into a folder called `easyeda-mcp` in your home folder.
+This downloads the latest release and unpacks it into a folder called `easyeda-mcp` in your home folder.
+
+macOS / Linux:
 
 ```bash
 cd ~
 curl -L -o easyeda-mcp.zip https://github.com/sheares/easyeda-mcp-fix/releases/latest/download/easyeda-mcp.zip
 unzip -o easyeda-mcp.zip
 ls ~/easyeda-mcp
+```
+
+Windows (PowerShell):
+
+```powershell
+cd $HOME
+curl.exe -L -o easyeda-mcp.zip https://github.com/sheares/easyeda-mcp-fix/releases/latest/download/easyeda-mcp.zip
+Expand-Archive -Force easyeda-mcp.zip -DestinationPath $HOME
+dir $HOME\easyeda-mcp
 ```
 
 You should see `dist`, `skills`, `README.md` and a file ending in `.eext`. Leave this folder where it is; Claude Code runs the server from here.
@@ -49,17 +63,25 @@ You should see `dist`, `skills`, `README.md` and a file ending in `.eext`. Leave
 
 1. Open EasyEDA Pro and any project.
 2. Go to **Advanced → Extension Manager**.
-3. Click **Import** and choose the `.eext` file in your `easyeda-mcp` folder (for example `easyeda-agent-mcp-server_v1.6.4.eext`). On a Mac, press **Cmd + Shift + H** in the file picker to jump to your home folder.
+3. Click **Import** and choose the `.eext` file in your `easyeda-mcp` folder (for example `easyeda-agent-mcp-server_v1.6.5.eext`). On a Mac, press **Cmd + Shift + H** in the file picker to jump to your home folder; on Windows it is `C:\Users\<your name>\easyeda-mcp`.
 4. In the Extension Manager, select **EasyEDA Agent** and turn on:
    - **External Interactions** (lets the extension talk to Claude on your computer)
    - **Show in top menu** (puts a **Claude** menu in the editor's top bar)
 
 ## 4. Connect Claude Code to the bridge
 
-Paste this into Terminal (one command):
+Paste the one command for your computer:
+
+macOS / Linux:
 
 ```bash
-claude mcp add --scope user easyeda -e EDA_REQUEST_TIMEOUT_MS=180000 -- node "$HOME/easyeda-mcp/dist/mcp-server/index.js"
+claude mcp add --scope user easyeda node "$HOME/easyeda-mcp/dist/mcp-server/index.js" -e EDA_REQUEST_TIMEOUT_MS=180000
+```
+
+Windows (PowerShell):
+
+```powershell
+claude mcp add --scope user easyeda node "$HOME\easyeda-mcp\dist\mcp-server\index.js" -e EDA_REQUEST_TIMEOUT_MS=180000
 ```
 
 - The name **must be `easyeda`**: the pcb-lint skill looks for tools with that name.
@@ -68,9 +90,18 @@ claude mcp add --scope user easyeda -e EDA_REQUEST_TIMEOUT_MS=180000 -- node "$H
 
 ## 5. Install the pcb-lint skill
 
+macOS / Linux:
+
 ```bash
 mkdir -p ~/.claude/skills
 cp -R ~/easyeda-mcp/skills/pcb-lint ~/.claude/skills/
+```
+
+Windows (PowerShell):
+
+```powershell
+New-Item -ItemType Directory -Force "$HOME\.claude\skills" | Out-Null
+Copy-Item -Recurse -Force "$HOME\easyeda-mcp\skills\pcb-lint" "$HOME\.claude\skills\"
 ```
 
 ## 6. Connect and test
@@ -110,12 +141,13 @@ Claude can change and delete things in your design. A few habits keep that safe:
 
 | What you see | What to do |
 |---|---|
-| `/mcp` shows **easyeda** as failed | Run `node --version` (must be 20.5+). Check the path in step 4 points at a real file: `ls ~/easyeda-mcp/dist/mcp-server/index.js`. To redo step 4, first run `claude mcp remove easyeda --scope user`. |
+| `/mcp` shows **easyeda** as failed | Run `node --version` (must be 20.5+). Check the path in step 4 points at a real file: `ls ~/easyeda-mcp/dist/mcp-server/index.js` (Windows: `dir $HOME\easyeda-mcp\dist\mcp-server\index.js`). To redo step 4, first run `claude mcp remove easyeda --scope user`. |
 | `extensionConnected: false` | In EasyEDA, open a schematic or PCB and click **Claude → Connect Claude**. Check **External Interactions** is on in the Extension Manager. Restart EasyEDA if needed. |
 | No **Claude** menu in EasyEDA | Open a schematic or PCB editor (not the home screen). If **Show in top menu** is off, the menu is under **Advanced** instead. |
 | No `mcp__easyeda__` tools, or `/pcb-lint` says the bridge is missing | The server must be registered as `easyeda` (step 4). Restart Claude Code after adding it. |
-| `/pcb-lint` not recognised | Check `ls ~/.claude/skills/pcb-lint/SKILL.md` exists, then restart Claude Code. |
+| `/pcb-lint` not recognised | Check `~/.claude/skills/pcb-lint/SKILL.md` exists (Windows: `dir $HOME\.claude\skills\pcb-lint`), then restart Claude Code. |
 | Calls time out on a big project | Raise the timeout in step 4 (for example `EDA_REQUEST_TIMEOUT_MS=300000`) and re-add the server. |
+| Windows: a backup or "git" error on an edit | Install [Git for Windows](https://git-scm.com/download/win), then restart Claude Code. Risky edits refuse to run without a backup. |
 | Claude edited the wrong document | Ask it to check `editor_get_open_tabs` and `list_instances` first, and name the sheet or board you mean. |
 | `server_info` shows `versionMismatch: true` after an update | Restart Claude Code, then ask Claude to run `bridge_restart`. |
 
@@ -123,16 +155,16 @@ Claude can change and delete things in your design. A few habits keep that safe:
 
 1. Re-run the download commands in step 2 (they overwrite the old files).
 2. In **Advanced → Extension Manager**, remove the old **EasyEDA Agent**, then import the new `.eext`. Turn the two toggles back on.
-3. Copy the skill again: `cp -R ~/easyeda-mcp/skills/pcb-lint ~/.claude/skills/`
+3. Copy the skill again (step 5).
 4. Restart Claude Code and EasyEDA Pro.
 
 ## Windows and Linux
 
-**Windows.** Native Windows does not work yet: the background bridge cannot open its local socket, so every tool call fails. A fix is planned; watch the [Releases page](https://github.com/sheares/easyeda-mcp-fix/releases).
+**Windows.** Supported from v1.6.5. Run everything (Node, git, Claude Code) natively in PowerShell, alongside the Windows EasyEDA Pro desktop app. Every release is tested automatically on Windows: the full test suite, plus starting the real server and bridge. What has not been confirmed yet is a full session with EasyEDA itself on a Windows PC, so if something fails, note the step and the error message and tell your lecturer.
 
-If you are comfortable with WSL2, this combination may work today, but nobody has tested it: EasyEDA Pro desktop on Windows, and Node, git and Claude Code inside WSL2. Follow steps 2, 4 and 5 inside WSL, and import the `.eext` into Windows EasyEDA (from `\\wsl$\<distro>\home\<you>\easyeda-mcp`). The extension then reaches the bridge through WSL's localhost forwarding, and connects with a weaker handshake because it cannot read the bridge's token file inside WSL. File paths you give Claude must be WSL paths (`/home/...`). If you try it, tell your lecturer whether it worked.
+WSL (Claude Code inside Linux on Windows) is not recommended for this tool: EasyEDA runs on Windows, so files and connections would have to cross between the two systems.
 
-**Linux.** Follow the macOS steps using the Linux EasyEDA Pro client. Untested; reports welcome.
+**Linux.** Follow the macOS / Linux commands with the Linux EasyEDA Pro client. The server and bridge are tested automatically on Linux; the EasyEDA side is untested.
 
 ## Where to go next
 
