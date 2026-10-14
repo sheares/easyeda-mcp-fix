@@ -1,4 +1,6 @@
 import { csvToRows } from './csv';
+import { selectFabLayers, type FabLayerInfo } from './fab-layers';
+import { BridgeUserError } from '../diag';
 
 async function fileToBase64(file: File): Promise<string> {
 	return new Promise((resolve, reject) => {
@@ -48,23 +50,12 @@ function withExportTimeout<T>(promise: Promise<T>, apiName: string): Promise<T> 
 	});
 }
 
-// Standard fab-layer types we want included by default when no explicit
-// `layers` list is supplied. Without this, EasyEDA's getGerberFile /
-// getOpenDatabaseDoublePlusFile only emit Top+Bottom copper — inner copper
-// layers go missing even on 4L+ boards.
-const DEFAULT_FAB_LAYER_TYPES = new Set([
-	'TOP', 'BOTTOM', 'SIGNAL', // copper (SIGNAL = Inner1..InnerN)
-	'TOP_SILK', 'BOT_SILK',
-	'TOP_SOLDER_MASK', 'BOT_SOLDER_MASK',
-	'TOP_PASTE_MASK', 'BOT_PASTE_MASK',
-	'OUTLINE',
-]);
-
+// Default layer list for gerber / ODB++ when the caller supplies none. Older
+// EasyEDA builds emitted only Top+Bottom copper without one; an explicit list
+// behaves the same on every build. Selection logic lives in fab-layers.ts.
 async function defaultEnabledFabLayers(mirrorKey: 'isMirror' | 'mirror'): Promise<Array<Record<string, unknown>>> {
-	const all = (await eda.pcb_Layer.getAllLayers()) as Array<{ id: number; type: string; layerStatus: number }>;
-	return all
-		.filter((l) => l.layerStatus === 1 && DEFAULT_FAB_LAYER_TYPES.has(l.type))
-		.map((l) => ({ layerId: l.id, [mirrorKey]: false }));
+	const all = (await eda.pcb_Layer.getAllLayers()) as FabLayerInfo[];
+	return selectFabLayers(all, mirrorKey);
 }
 
 export const manufactureHandlers: Record<string, (params: Record<string, any>) => Promise<any>> = {
@@ -129,6 +120,29 @@ export const manufactureHandlers: Record<string, (params: Record<string, any>) =
 		);
 		if (!file) throw new Error('getBomFile returned no file');
 		return csvToRows(await file.text());
+	},
+
+	// Schematic image export. A multi-page SVG comes back as a zip (EDA decides);
+	// the file name EDA returns says which. Both need EDA 3.2.183+.
+	'sch.manufacture.getSvgFile': async (params) => {
+		const m = eda.sch_ManufactureData as any;
+		if (typeof m.getSvgFile !== 'function') {
+			throw new BridgeUserError('sch_ManufactureData.getSvgFile is not available in this EasyEDA Pro build (needs a newer version)');
+		}
+		const file = await withExportTimeout<File | undefined>(m.getSvgFile(params.fileName), 'sch_ManufactureData.getSvgFile');
+		return exportFile(file);
+	},
+
+	'sch.manufacture.getPngFile': async (params) => {
+		const m = eda.sch_ManufactureData as any;
+		if (typeof m.getPngFile !== 'function') {
+			throw new BridgeUserError('sch_ManufactureData.getPngFile is not available in this EasyEDA Pro build (needs a newer version)');
+		}
+		const resolution = params.width != null || params.height != null
+			? { width: params.width, height: params.height }
+			: undefined;
+		const file = await withExportTimeout<File | undefined>(m.getPngFile(params.fileName, resolution), 'sch_ManufactureData.getPngFile');
+		return exportFile(file);
 	},
 
 	'pcb.manufacture.getPickAndPlaceFile': async (params) => {
