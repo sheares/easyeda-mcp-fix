@@ -155,7 +155,13 @@ fourth pass on 2026-09-06
 field use, produced v1.6.2: late-`auth.ok` recovery and a headless harness
 for the extension's request pipeline. v1.6.3 fixed new-project imports,
 v1.6.4 added the library footprint tools, and v1.6.5 made the bridge run on
-native Windows (a named pipe in place of the Unix socket file).
+native Windows (a named pipe in place of the Unix socket file). v1.6.6 moved
+to the 0.4.26 API types (EasyEDA Pro 3.2.206). It fixed the default Gerber and
+ODB++ layer set, which had left out silk, mask, paste, outline and plane
+layers. It also fixed pad, region, via and fill parameters that never reached
+EasyEDA in the form it needs, and guarded rule-config saves. New tools: pour
+rebuild, library footprint and symbol source reads, and schematic SVG/PNG
+export.
 
 ### Environment variables
 
