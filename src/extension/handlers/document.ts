@@ -1,7 +1,7 @@
 export const documentHandlers: Record<string, (params: Record<string, any>) => Promise<any>> = {
 	// === Document ===
 
-	// save() takes no arguments as of pro-api-types 0.3.5: it saves the active
+	// save() takes no arguments (pro-api-types 0.3.5 through 0.4.26): it saves the active
 	// document, which the request queue's switchToDocument has already selected.
 	'pcb.document.save': async () => {
 		return eda.pcb_Document.save();

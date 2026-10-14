@@ -26,7 +26,7 @@
 		"zod": "^4.0.0"
 	},
 	"devDependencies": {
-		"@jlceda/pro-api-types": "^0.3.5",
+		"@jlceda/pro-api-types": "^0.4.26",
 		"@types/fs-extra": "^11.0.4",
 		"@types/node": "^22.13.4",
 		"@types/ws": "^8.5.14",

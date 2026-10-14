@@ -60,7 +60,7 @@ export function invalidateNetlistCache(): void {
  * shape matches `parseRawNetlist`, and fall back to the deprecated call only if
  * the new API is missing on this EDA Pro build.
  *
- * Considered and rejected (types 0.3.5): the alpha `SCH_Net.getCurrentProjectAllNets`
+ * Considered and rejected (types 0.3.5; still true in 0.4.26): the alpha `SCH_Net.getCurrentProjectAllNets`
  * returns nets as wire lists (wire name/id, page uuid) with no component pins,
  * designators, or props, so it cannot produce the per-component ParsedNetlist
  * shape every consumer here needs. Revisit if a later SDK adds pin info to
