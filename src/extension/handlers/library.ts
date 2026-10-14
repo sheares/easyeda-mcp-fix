@@ -86,6 +86,31 @@ export const libraryHandlers: Record<string, (params: Record<string, any>) => Pr
 		);
 	},
 
+	// @beta read path (efoo/esym 3.0 JSON). Works on project libraries including unsaved edits.
+	'lib.footprint.getDocumentSource': async (params) => {
+		const lib = eda.lib_Footprint as any;
+		if (typeof lib.getDocumentSource !== 'function') {
+			throw new BridgeUserError('lib_Footprint.getDocumentSource is not available in this EasyEDA Pro build (needs a newer version)');
+		}
+		const source = await lib.getDocumentSource(params.footprintUuid, params.libraryUuid);
+		if (typeof source !== 'string') {
+			throw new BridgeUserError(`No footprint source returned for footprint ${params.footprintUuid} in library ${params.libraryUuid ?? '(system library)'}; check both UUIDs.`);
+		}
+		return source;
+	},
+
+	'lib.symbol.getDocumentSource': async (params) => {
+		const lib = eda.lib_Symbol as any;
+		if (typeof lib.getDocumentSource !== 'function') {
+			throw new BridgeUserError('lib_Symbol.getDocumentSource is not available in this EasyEDA Pro build (needs a newer version)');
+		}
+		const source = await lib.getDocumentSource(params.symbolUuid, params.libraryUuid);
+		if (typeof source !== 'string') {
+			throw new BridgeUserError(`No symbol source returned for symbol ${params.symbolUuid} in library ${params.libraryUuid ?? '(system library)'}; check both UUIDs.`);
+		}
+		return source;
+	},
+
 	'lib.footprint.get': async (params) => {
 		return eda.lib_Footprint.get(params.footprintUuid, params.libraryUuid);
 	},

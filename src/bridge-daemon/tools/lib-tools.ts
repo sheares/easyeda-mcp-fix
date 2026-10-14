@@ -100,7 +100,7 @@ export function libTools(ctx: ToolContext): ToolDef[] {
 		{
 			name: 'lib_symbol_get',
 			annotations: ANN.READ_ONLY,
-			description: 'Get a library symbol\'s metadata (name, classification, description) by UUID. Does NOT return the .esym source — use lib_symbol_open_in_editor + document_get_source for that.',
+			description: 'Get a library symbol\'s metadata (name, classification, description) by UUID. Does NOT return the .esym source — use lib_symbol_get_source for that.',
 			inputShape: withInstanceParam({
 				symbolUuid: z.string().describe('Symbol UUID'),
 				libraryUuid: z.string().optional().describe('Library UUID (defaults to system library)'),
@@ -171,7 +171,7 @@ export function libTools(ctx: ToolContext): ToolDef[] {
 		{
 			name: 'lib_symbol_update_document_source',
 			annotations: ANN.DESTRUCTIVE,
-			description: 'Replace a library symbol\'s entire .esym source. IRREVERSIBLE: no undo, and no backup snapshot is taken (library assets are not documents). Fetch and save the current source with lib_symbol_get first if you may need to restore it. The symbol must live in a library you can write to (personal/team/project). Returns boolean success.',
+			description: 'Replace a library symbol\'s entire .esym source. IRREVERSIBLE: no undo, and no backup snapshot is taken (library assets are not documents). Save the current source first with lib_symbol_get_source if you may need to restore it. Documented sequence for an edit: lib_symbol_open_in_editor, wait about 1.5 s for the editor to load, read the source with lib_symbol_get_source, then call this. The symbol must live in a library you can write to (personal/team/project). Returns boolean success.',
 			inputShape: withInstanceParam({
 				symbolUuid: z.string().describe('Symbol UUID'),
 				libraryUuid: z.string().describe('Library UUID containing the symbol'),
@@ -193,7 +193,7 @@ export function libTools(ctx: ToolContext): ToolDef[] {
 		{
 			name: 'lib_footprint_get',
 			annotations: ANN.READ_ONLY,
-			description: 'Get a library footprint\'s metadata (uuid, library, name, classification, description) by UUID. Read the source itself by opening the footprint with lib_footprint_open_in_editor and calling document_get_source on the returned tabId.',
+			description: 'Get a library footprint\'s metadata (uuid, library, name, classification, description) by UUID. Read the source itself with lib_footprint_get_source.',
 			inputShape: withInstanceParam({
 				footprintUuid: z.string().describe('Footprint UUID'),
 				libraryUuid: z.string().optional().describe('Library UUID containing the footprint (defaults to the system library)'),
@@ -227,7 +227,7 @@ export function libTools(ctx: ToolContext): ToolDef[] {
 		{
 			name: 'lib_footprint_update_document_source',
 			annotations: ANN.DESTRUCTIVE,
-			description: 'Replace a library footprint\'s entire source. IRREVERSIBLE: no undo, and no backup snapshot is taken (library assets are not documents). Read and save the current source first (lib_footprint_open_in_editor + document_save_to_file). The footprint must live in a library you can write to (personal/team/project). Returns boolean success.',
+			description: 'Replace a library footprint\'s entire source. IRREVERSIBLE: no undo, and no backup snapshot is taken (library assets are not documents). Read and save the current source first with lib_footprint_get_source (the read path, returns the full source string). Documented sequence for an edit: lib_footprint_open_in_editor, wait about 1.5 s for the editor to load, read the current source with lib_footprint_get_source, then call this.  The footprint must live in a library you can write to (personal/team/project). Returns boolean success.',
 			inputShape: withInstanceParam({
 				footprintUuid: z.string().describe('Footprint UUID'),
 				libraryUuid: z.string().describe('Library UUID containing the footprint (see lib_get_project_library_uuid / lib_get_personal_library_uuid)'),
@@ -241,6 +241,34 @@ export function libTools(ctx: ToolContext): ToolDef[] {
 					instance_id,
 				});
 				return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
+			},
+		},
+
+		{
+			name: 'lib_footprint_get_source',
+			annotations: ANN.READ_ONLY,
+			description: 'Read a library footprint\'s full source (efoo 3.0 JSON string). Works on project libraries including unsaved edits, and on personal/system libraries. Needs a recent EasyEDA Pro build; older ones get a clear error. Errors if the footprint is not found in that library.',
+			inputShape: withInstanceParam({
+				footprintUuid: z.string().describe('Footprint UUID'),
+				libraryUuid: z.string().optional().describe('Library UUID containing the footprint (defaults to the system library)'),
+			}),
+			handler: async ({ footprintUuid, libraryUuid, instance_id }) => {
+				const result = await ctx.sendToExtension('lib.footprint.getDocumentSource', { footprintUuid, libraryUuid, instance_id });
+				return { content: [{ type: 'text', text: typeof result === 'string' ? result : JSON.stringify(result ?? null) }] };
+			},
+		},
+
+		{
+			name: 'lib_symbol_get_source',
+			annotations: ANN.READ_ONLY,
+			description: 'Read a library symbol\'s full source (esym 3.0 JSON string). Works on project libraries including unsaved edits, and on personal/system libraries. Needs a recent EasyEDA Pro build; older ones get a clear error. Errors if the symbol is not found in that library.',
+			inputShape: withInstanceParam({
+				symbolUuid: z.string().describe('Symbol UUID'),
+				libraryUuid: z.string().optional().describe('Library UUID containing the symbol (defaults to the system library)'),
+			}),
+			handler: async ({ symbolUuid, libraryUuid, instance_id }) => {
+				const result = await ctx.sendToExtension('lib.symbol.getDocumentSource', { symbolUuid, libraryUuid, instance_id });
+				return { content: [{ type: 'text', text: typeof result === 'string' ? result : JSON.stringify(result ?? null) }] };
 			},
 		},
 
