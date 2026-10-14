@@ -155,14 +155,17 @@ fourth pass on 2026-09-06
 field use, produced v1.6.2: late-`auth.ok` recovery and a headless harness
 for the extension's request pipeline. v1.6.3 fixed new-project imports,
 v1.6.4 added the library footprint tools, and v1.6.5 made the bridge run on
-native Windows (a named pipe in place of the Unix socket file). v1.6.8 moved
+native Windows (a named pipe in place of the Unix socket file). v1.6.9 moved
 to the 0.4.26 API types (EasyEDA Pro 3.2.206) and fixed the extension's
 handshake there: 3.2.206 sandboxes have no `crypto.subtle`, so the HMAC now
 falls back to a built-in SHA-256. It also fixed the default Gerber and
 ODB++ layer set, which had left out silk, mask, paste, outline and plane
 layers, and pad, region, via and fill parameters that never reached EasyEDA
-in the form it needs, and it guards rule-config saves. New tool: pour
-rebuild.
+in the form it needs, and it guards rule-config saves. Fill and region
+results are now read back from the board, because EasyEDA's reply echoes
+values it did not keep, and validation understands the `{header}||{body}`
+lines EasyEDA Pro 3 uses for live documents. New tool: pour rebuild, though
+on 3.2.206 EasyEDA cannot rebuild pours created through the API.
 
 ### Environment variables
 
