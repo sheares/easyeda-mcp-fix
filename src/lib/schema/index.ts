@@ -8,7 +8,7 @@
  */
 
 export * from './types';
-export { wrapAsParsedLine, serializeParsedLines } from './parser';
+export { wrapAsParsedLine, serializeParsedLines, isPipeFormatSource, validatePipeSource, assertArrayFormatSource, PIPE_FORMAT_NOTE } from './parser';
 export * from './line-head';
 export * from './line-component';
 export * from './line-attr';

@@ -7,6 +7,8 @@ import {
 	parseEschSource,
 	parseEsymSource,
 	parseEpcbSource,
+	isPipeFormatSource,
+	validatePipeSource,
 	logDiscovery,
 	type ValidationReport,
 } from '../../lib/schema';
@@ -28,6 +30,7 @@ export async function validateSchematicSource(
 	source: string,
 	context: { projectUuid?: string; documentUuid?: string },
 ): Promise<ValidationReport> {
+	if (isPipeFormatSource(source)) return validatePipeSource(source, 'esch');
 	const { report } = parseEschSource(source);
 	if (report.samples.unknownTags.length > 0) {
 		try {
@@ -44,6 +47,7 @@ export async function validateSymbolSource(
 	source: string,
 	context: { projectUuid?: string; documentUuid?: string },
 ): Promise<ValidationReport> {
+	if (isPipeFormatSource(source)) return validatePipeSource(source, 'esym');
 	const { report } = parseEsymSource(source);
 	if (report.samples.unknownTags.length > 0) {
 		try {
@@ -59,6 +63,7 @@ export async function validatePcbSource(
 	source: string,
 	context: { projectUuid?: string; documentUuid?: string },
 ): Promise<ValidationReport> {
+	if (isPipeFormatSource(source)) return validatePipeSource(source, 'epcb');
 	const { report } = parseEpcbSource(source);
 	if (report.samples.unknownTags.length > 0) {
 		try {

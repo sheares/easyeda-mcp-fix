@@ -187,3 +187,97 @@ export function serializeParsedLines<L>(lines: ParsedLine<L>[]): string {
 export function wrapAsParsedLine<L>(data: L): ParsedLine<L> {
 	return { kind: 'known', data, raw: JSON.stringify(data), lineIndex: -1, mutated: true };
 }
+
+/**
+ * EasyEDA Pro 3 returns live documents (getDocumentSource, so
+ * document_save_to_file) as `{header}||{body}|` lines rather than the JSON
+ * arrays the per-tag schemas describe; project_export_file still writes JSON
+ * arrays. The header names the line's `type` (and usually `id` and `ticket`);
+ * the body holds the data, and some lines end in a single `|`, some do not.
+ */
+export function isPipeFormatSource(source: string): boolean {
+	const firstLine = source.trimStart().split('\n', 1)[0];
+	return firstLine.startsWith('{') && firstLine.includes('}||');
+}
+
+export const PIPE_FORMAT_NOTE =
+	'EasyEDA Pro 3 pipe-delimited source ({header}||{body} lines): each line was checked for structure only ' +
+	'(a JSON header naming a string "type", then a JSON object body). The per-tag schemas cover the JSON-array format that project_export_file writes.';
+
+function splitPipeLine(line: string): { ok: true; type: string } | { ok: false; reason: string } {
+	// The header is the shortest prefix before a "||" that parses as JSON.
+	for (let at = line.indexOf('||'); at >= 0; at = line.indexOf('||', at + 1)) {
+		let header: unknown;
+		try {
+			header = JSON.parse(line.slice(0, at));
+		} catch {
+			continue;
+		}
+		if (header === null || typeof header !== 'object' || Array.isArray(header) || typeof (header as any).type !== 'string') {
+			return { ok: false, reason: 'header is not a JSON object with a string "type"' };
+		}
+		let body = line.slice(at + 2);
+		if (body.endsWith('|')) body = body.slice(0, -1);
+		if (body === '') return { ok: true, type: (header as any).type };
+		let parsed: unknown;
+		try {
+			parsed = JSON.parse(body);
+		} catch (err) {
+			return { ok: false, reason: `body is not valid JSON: ${err instanceof Error ? err.message : String(err)}` };
+		}
+		if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
+			return { ok: false, reason: 'body is not a JSON object' };
+		}
+		return { ok: true, type: (header as any).type };
+	}
+	return { ok: false, reason: 'no JSON header followed by "||"' };
+}
+
+/** Structural check of a pipe-delimited source. See PIPE_FORMAT_NOTE. */
+export function validatePipeSource(source: string, docType: SchemaDocType): ValidationReport {
+	const rawLines = source.split('\n');
+	const invalid: ValidationIssue[] = [];
+	let knownCount = 0;
+	let invalidCount = 0;
+	let blankCount = 0;
+	for (let i = 0; i < rawLines.length; i++) {
+		const trimmed = rawLines[i].trim();
+		if (!trimmed) {
+			blankCount++;
+			continue;
+		}
+		const result = splitPipeLine(trimmed);
+		if (result.ok) {
+			knownCount++;
+			continue;
+		}
+		invalidCount++;
+		if (invalid.length < MAX_SAMPLE_INVALIDS) {
+			invalid.push({ lineIndex: i, classification: 'parse-error', tag: null, reason: result.reason });
+		}
+	}
+	return {
+		docType,
+		note: PIPE_FORMAT_NOTE,
+		lineCount: rawLines.length,
+		knownCount,
+		unknownTagCount: 0,
+		invalidCount,
+		blankCount,
+		samples: { unknownTags: [], invalid },
+	};
+}
+
+/**
+ * The reader, writer and symbol editor only understand the JSON-array format.
+ * Fed a pipe-delimited source they would see no lines they know and go on with
+ * an empty model, so refuse it instead.
+ */
+export function assertArrayFormatSource(source: string, what: string): void {
+	if (isPipeFormatSource(source)) {
+		throw new Error(
+			`${what}: this source is in EasyEDA Pro 3's pipe-delimited format ({header}||{body} lines), which this library cannot read. ` +
+				'It reads the JSON-array format (lines like ["HEAD",{...}]) that project_export_file writes, so take the source from an .epro export, not document_save_to_file.',
+		);
+	}
+}

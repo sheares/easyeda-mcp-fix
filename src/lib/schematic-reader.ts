@@ -10,6 +10,7 @@
 import {
 	parseEschSource,
 	parseEsymSource,
+	assertArrayFormatSource,
 	type ParsedLine,
 	type EschLine,
 	type EsymLine,
@@ -178,6 +179,7 @@ function transformPinAngle(pinAngle: number, rotationDeg: number, flip: number):
  * Parse a symbol .esym file to extract pin definitions.
  */
 export function parseSymbol(source: string): { symbol: SymbolInfo; validation: ValidationReport } {
+	assertArrayFormatSource(source, 'parseSymbol');
 	const { lines, report } = parseEsymSource(source);
 
 	let symbolType = 0;
@@ -241,6 +243,7 @@ export function parseSchematic(
 	symbolSources?: Record<string, string>,
 	projectJson?: ProjectJson,
 ): SchematicModel {
+	assertArrayFormatSource(source, 'parseSchematic');
 	const { lines: parsedLines, report: validation } = parseEschSource(source);
 
 	// maxId from HEAD

@@ -41,8 +41,10 @@ import * as ANN from './annotations';
 const WORKFLOW_HINT = `\n\nFAST-BATCH WORKFLOW: for making many changes at once, it is much faster to export \
 the document or project (document_save_to_file / project_export_file), edit the raw \
 source on disk, then re-upload (document_load_from_file / project_import_file) than \
-to issue many small per-primitive MCP calls. The document source is newline-delimited \
-JSON arrays; .epro files are ZIP archives of the same. Every destructive upload is \
+to issue many small per-primitive MCP calls. Formats differ: on EasyEDA Pro 3, \
+document_save_to_file returns {header}||{body} lines, while the .epro from \
+project_export_file holds newline-delimited JSON arrays, which is what the src/lib \
+editing library reads. Every destructive upload is \
 auto-backed-up to a local git repo first — the response includes a backup SHA you can \
 use to find the prior state if the edit goes wrong. Upload tools accept validate='off'\
 |'warn'|'strict' (default 'strict') which runs the Zod schema on the new source — see\
@@ -89,7 +91,7 @@ export function fileManagerTools(ctx: ToolContext): ToolDef[] {
 			name: 'document_get_source',
 			annotations: ANN.READ_ONLY,
 			description: `Get the raw source code of the currently active document (schematic page, PCB, or panel).
-Returns the document as a string in EasyEDA's internal format (newline-delimited JSON arrays).
+Returns the document as a string in EasyEDA's internal format (on EasyEDA Pro 3, one {header}||{body} line per record).
 Use editor_open_document to switch to the desired document first, then call this tool.
 The source can be modified and written back with document_set_source.
 
@@ -163,7 +165,7 @@ backup.sha references the pre-edit state. Validation runs only for schematic doc
 			annotations: ANN.WRITE_LOCAL_FILE,
 			description: `Save the source code of the currently active document to a local file.
 Fetches the document source from EasyEDA and writes it directly to disk.
-The file will contain the document in EasyEDA's internal format (newline-delimited JSON arrays).
+The file will contain the document in EasyEDA's internal format (on EasyEDA Pro 3, one {header}||{body} line per record; the src/lib editing library cannot read this, so use project_export_file for library edits).
 Use document_load_from_file to push a modified file back.
 
 For schematic documents, the source is also run through the schema validator in

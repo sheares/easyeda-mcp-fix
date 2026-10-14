@@ -37,6 +37,8 @@ export type SchemaDocType = 'esch' | 'esym' | 'epcb' | 'eins';
 export interface ValidationReport {
 	docType: SchemaDocType | 'other';
 	skipped?: { reason: string };
+	/** How the source was checked, when that differs from the per-tag schemas. */
+	note?: string;
 	lineCount: number;
 	knownCount: number;
 	unknownTagCount: number;

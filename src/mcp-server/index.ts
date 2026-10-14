@@ -32,11 +32,11 @@ function buildInstructions(repoRoot: string): string {
 		`This MCP server's source lives at ${repoRoot}. The editing library, schema, examples, and tests are all under that path; consult them when the tool descriptions aren't enough.`,
 		'',
 		'EDIT WORKFLOW — use this for anything beyond a single primitive change:',
-		`  1. Pull the source: \`document_save_to_file\` (one document) or \`project_export_file\` (whole project as .epro ZIP of NDJSON).`,
+		`  1. Pull the source: \`project_export_file\` (whole project as .epro ZIP of NDJSON arrays, the format the library reads) or \`document_save_to_file\` (one document; on EasyEDA Pro 3 this is {header}||{body} lines, which the library refuses, so only edit it by hand).`,
 		`  2. Edit the raw source on disk. For schematic edits, use the library at ${repoRoot}/src/lib/ (README at ${repoRoot}/src/lib/README.md, runnable examples at ${repoRoot}/examples/). It exposes a typed SchematicWriter that handles element IDs, unique IDs, junction wires, designator allocation, and maxId bookkeeping. Write a throwaway ts-node script rather than issuing many per-primitive MCP calls — it is orders of magnitude faster.`,
 		`  3. Push the result back: \`document_load_from_file\` or \`project_import_file\`. Every destructive upload is auto-backed up to a git repo (default \`~/.easyeda-mcp-backup\`, override with EDA_BACKUP_DIR); the response returns a backup SHA you can reference if the edit goes wrong.`,
 		'',
-		'VALIDATION: uploads default to validate=\'strict\' (any unknown or malformed line aborts the upload). Downloads run in warn mode and attach a validation report.',
+		'VALIDATION: uploads default to validate=\'strict\' (any unknown or malformed line aborts the upload). Downloads run in warn mode and attach a validation report. {header}||{body} sources are checked for structure only (the report carries a note saying so).',
 		`If a download or upload surfaces \`unknown-tag\` samples, this server's Zod schema is missing coverage for a shape EasyEDA actually emits. To extend it: read an existing per-line schema under ${repoRoot}/src/lib/schema/line-*.ts as precedent, add a new Line schema for the tag (or extend an existing one), wire it into the matching doc-type union + schemaMap in esch.ts / esym.ts / epcb.ts / eins.ts, and run \`npm test\` (from ${repoRoot}). The unknown-tag samples in the validation report include the tag name, tuple length, and a sample row — enough to start. When in doubt survey real files the same way ${repoRoot}/src/lib/schema/line-pcb.ts was derived.`,
 	].join('\n');
 }

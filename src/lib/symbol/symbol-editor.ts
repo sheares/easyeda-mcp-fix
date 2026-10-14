@@ -12,6 +12,7 @@
  */
 
 import { parseEsymSource, serializeEsymLines, type EsymLine } from '../schema/esym';
+import { assertArrayFormatSource } from '../schema/parser';
 import type { FontStyleLine } from '../schema/line-fontstyle';
 import type { AttrLine } from '../schema/line-attr';
 import type { ParsedLine } from '../schema/types';
@@ -53,6 +54,7 @@ export class SymbolEditor {
 	}
 
 	static load(source: string): SymbolEditor {
+		assertArrayFormatSource(source, 'SymbolEditor.load');
 		const { lines, report } = parseEsymSource(source);
 		if (report.invalidCount > 0) {
 			const issue = report.samples.invalid[0];
