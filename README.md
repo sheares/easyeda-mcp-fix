@@ -155,7 +155,7 @@ fourth pass on 2026-09-06
 field use, produced v1.6.2: late-`auth.ok` recovery and a headless harness
 for the extension's request pipeline. v1.6.3 fixed new-project imports,
 v1.6.4 added the library footprint tools, and v1.6.5 made the bridge run on
-native Windows (a named pipe in place of the Unix socket file). v1.6.7 moved
+native Windows (a named pipe in place of the Unix socket file). v1.6.8 moved
 to the 0.4.26 API types (EasyEDA Pro 3.2.206) and fixed the extension's
 handshake there: 3.2.206 sandboxes have no `crypto.subtle`, so the HMAC now
 falls back to a built-in SHA-256. It also fixed the default Gerber and
