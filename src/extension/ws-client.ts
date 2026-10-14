@@ -668,7 +668,17 @@ async function answerAuthChallenge(
 		// Browser build, permission disabled, or the API is absent on this EDA
 		// version. token stays null.
 	}
-	const answer = await buildExtensionAuthAnswer({ scheme, serverNonce }, token);
+	let answer: Awaited<ReturnType<typeof buildExtensionAuthAnswer>>;
+	try {
+		answer = await buildExtensionAuthAnswer({ scheme, serverNonce }, token);
+	} catch (err) {
+		// Never leave the challenge unanswered: that only surfaces as a silent
+		// 15 s timeout (EasyEDA 3.2.206 hit this when crypto.subtle vanished).
+		// Log it and answer as a build that could not read the token.
+		bridgeLog(`auth: could not build the hmac-v1 answer: ${describeError(err)}`);
+		answer = await buildExtensionAuthAnswer({ scheme, serverNonce }, null);
+		token = null;
+	}
 	const gate = verificationGate();
 	if (answer.kind === 'hmac') {
 		(globalThis as any)[AUTH_STATE_KEY] = {
@@ -714,8 +724,10 @@ function handleAuthOk(mac: unknown): void {
 			if (ok && gate.state() === 'pending') bridgeLog('daemon verified via hmac-v1 mutual auth');
 			gate.authOkChecked(ok);
 		})
-		.catch(() => {
-			// webcrypto unavailable: we cannot check, so we do not trust.
+		.catch((err) => {
+			// HMAC failed (should not happen now that a pure fallback exists):
+			// we cannot check, so we do not trust.
+			bridgeLog(`auth: could not verify the daemon's mac: ${describeError(err)}`);
 			gate.authOkChecked(false);
 		});
 }

@@ -7,15 +7,17 @@
 //      readable.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { createHmac } from 'node:crypto';
+import { createHash, createHmac, randomBytes } from 'node:crypto';
 import {
 	AUTH_SCHEME_HMAC_V1,
 	buildExtensionAuthAnswer,
 	daemonMacMessage,
 	extMacMessage,
 	hmacSha256Hex,
+	hmacSha256HexPure,
 	isHmacChallenge,
 	randomHexNonce,
+	sha256,
 } from '../src/bridge-daemon/auth-mac';
 
 const TOKEN = 'deadbeefcafef00d'.repeat(4);
@@ -92,4 +94,59 @@ test('randomHexNonce produces distinct lowercase hex of the requested width', ()
 	assert.match(b, /^[0-9a-f]{32}$/);
 	assert.notEqual(a, b);
 	assert.match(randomHexNonce(8), /^[0-9a-f]{16}$/);
+});
+
+// Pure fallback (EasyEDA 3.2.206 sandboxes have no crypto.subtle).
+
+test('pure sha256 matches node:crypto across every padding boundary', () => {
+	for (let len = 0; len <= 200; len++) {
+		const data = randomBytes(len);
+		const ours = Buffer.from(sha256(new Uint8Array(data))).toString('hex');
+		assert.equal(ours, createHash('sha256').update(data).digest('hex'), `length ${len}`);
+	}
+});
+
+test('pure HMAC matches the RFC 4231 vectors', () => {
+	// Case 2 ("Jefe") and case 6 (131-byte key, hashed first). Keys built from
+	// latin-1 bytes would not survive UTF-8, so case 6 uses an ASCII key of
+	// the same length and node:crypto as the reference.
+	assert.equal(
+		hmacSha256HexPure('Jefe', 'what do ya want for nothing?'),
+		'5bdcc146bf60754e6a042426089575c75a003f089d2739839dec58b964ec3843',
+	);
+	const longKey = 'k'.repeat(131);
+	const msg = 'Test Using Larger Than Block-Size Key - Hash Key First';
+	assert.equal(hmacSha256HexPure(longKey, msg), nodeHmacHex(longKey, msg));
+});
+
+test('pure HMAC matches node:crypto on random keys and messages, incl. non-ASCII', () => {
+	const alphabet = 'abcdef0123456789|-_ \u00e9\u4e2d\ud83d\ude00';
+	const pick = (n: number) => Array.from({ length: n }, () => alphabet[Math.floor(Math.random() * alphabet.length)]).join('');
+	for (let i = 0; i < 300; i++) {
+		const key = pick(Math.floor(Math.random() * 150));
+		const msg = pick(Math.floor(Math.random() * 300));
+		assert.equal(hmacSha256HexPure(key, msg), nodeHmacHex(key, msg), `key ${JSON.stringify(key)}`);
+	}
+});
+
+test('hmacSha256Hex falls back to the pure HMAC when crypto.subtle is missing', async (t) => {
+	const desc = Object.getOwnPropertyDescriptor(globalThis, 'crypto');
+	if (!desc || !desc.configurable) {
+		t.skip('globalThis.crypto is not configurable on this Node');
+		return;
+	}
+	const real = (globalThis as any).crypto;
+	Object.defineProperty(globalThis, 'crypto', {
+		configurable: true,
+		value: { getRandomValues: real.getRandomValues.bind(real) },
+	});
+	try {
+		const msg = extMacMessage(SERVER_NONCE, CLIENT_NONCE);
+		assert.equal(await hmacSha256Hex(TOKEN, msg), nodeHmacHex(TOKEN, msg));
+		const answer = await buildExtensionAuthAnswer({ scheme: AUTH_SCHEME_HMAC_V1, serverNonce: SERVER_NONCE }, TOKEN, () => CLIENT_NONCE);
+		assert.equal(answer.kind, 'hmac');
+		if (answer.kind === 'hmac') assert.equal(answer.data.mac, nodeHmacHex(TOKEN, msg));
+	} finally {
+		Object.defineProperty(globalThis, 'crypto', desc);
+	}
 });

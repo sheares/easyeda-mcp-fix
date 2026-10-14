@@ -65,7 +65,7 @@ You should see `dist`, `skills`, `README.md`, `CLAUDE.md` and a file ending in `
 
 1. Open EasyEDA Pro and any project.
 2. Go to **Advanced → Extension Manager**.
-3. Click **Import** and choose the `.eext` file in your `easyeda-mcp` folder (for example `easyeda-agent-mcp-server_v1.6.6.eext`). On a Mac, press **Cmd + Shift + H** in the file picker to jump to your home folder; on Windows it is `C:\Users\<your name>\easyeda-mcp`.
+3. Click **Import** and choose the `.eext` file in your `easyeda-mcp` folder (for example `easyeda-agent-mcp-server_v1.6.7.eext`). On a Mac, press **Cmd + Shift + H** in the file picker to jump to your home folder; on Windows it is `C:\Users\<your name>\easyeda-mcp`.
 4. In the Extension Manager, select **EasyEDA Agent** and turn on:
    - **External Interactions** (lets the extension talk to Claude on your computer)
    - **Show in top menu** (puts a **Claude** menu in the editor's top bar)
