@@ -24,8 +24,8 @@ import * as ANN from './annotations';
  *
  * Validation: document_set_source and document_load_from_file accept an optional
  * `validate` parameter ('off' | 'warn' | 'strict', default 'strict'). Validation
- * runs only for schematic documents (documentType=1) — other types skip with a
- * status. In 'strict' (default), any validation issue aborts the upload. In
+ * runs for schematic and PCB documents (documentType 1 and 3); other types skip
+ * with a status. EasyEDA Pro 3 {header}||{body} sources get a structural check. In 'strict' (default), any validation issue aborts the upload. In
  * 'warn', only schema-invalid known-tag lines and JSON parse errors abort
  * (these are almost always writer bugs); unknown-tag shapes pass through with a
  * log to the discovery file. Validation happens before backup; if validation
@@ -95,7 +95,7 @@ Returns the document as a string in EasyEDA's internal format (on EasyEDA Pro 3,
 Use editor_open_document to switch to the desired document first, then call this tool.
 The source can be modified and written back with document_set_source.
 
-For schematic documents, the source is also run through the schema validator
+For schematic and PCB documents, the source is also run through the schema validator
 as a side effect — any unknown tags get logged to ~/.easyeda-schema-discovery.jsonl
 so we can grow the schema. The response itself is unchanged. Use document_validate
 for a structured validation report.${WORKFLOW_HINT}`,
@@ -126,8 +126,8 @@ validation aborts the upload or the pre-edit backup could not be written.
 WARNING: This replaces the entire document. Always get the current source first, modify it,
 then set it back. A backup of the prior state is taken automatically before the replacement
 (after validation passes) and committed to a local git-tracked repo — the returned
-backup.sha references the pre-edit state. Validation runs only for schematic documents
-(documentType=1); other types skip with a status.${WORKFLOW_HINT}`,
+backup.sha references the pre-edit state. Validation runs for schematic and PCB documents
+(documentType 1 and 3); other types skip with a status.${WORKFLOW_HINT}`,
 			inputShape: withDocumentParam({
 				source: z.string().describe('The complete document source code to set'),
 				validate: ValidateMode.optional().describe(
@@ -168,7 +168,7 @@ Fetches the document source from EasyEDA and writes it directly to disk.
 The file will contain the document in EasyEDA's internal format (on EasyEDA Pro 3, one {header}||{body} line per record; the src/lib editing library cannot read this, so use project_export_file for library edits).
 Use document_load_from_file to push a modified file back.
 
-For schematic documents, the source is also run through the schema validator in
+For schematic and PCB documents, the source is also run through the schema validator in
 warn mode — the returned JSON includes a validation report, and any unknown tags
 are logged to ~/.easyeda-schema-discovery.jsonl. Since this is a download
 (EasyEDA's output), a schema mismatch means our schema is missing coverage, not
@@ -199,8 +199,8 @@ Reads the file from disk and calls setDocumentSource to replace the document con
 The file must contain valid EasyEDA document source (same format as document_get_source / document_save_to_file).
 WARNING: This replaces the entire document. A backup of the prior state is taken automatically
 (after validation passes) and committed to a local git-tracked repo — the returned backup.sha
-references the pre-edit state. Validation runs only for schematic documents (documentType=1);
-other types skip with a status.${WORKFLOW_HINT}`,
+references the pre-edit state. Validation runs for schematic and PCB documents (documentType 1
+and 3); other types skip with a status.${WORKFLOW_HINT}`,
 			inputShape: withDocumentParam({
 				filePath: z.string().describe('Absolute path to read the document source from'),
 				validate: ValidateMode.optional().describe(
