@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import type { ToolDef, ToolContext } from '../types';
 import { withDocumentParam } from './query-params';
+import { backupDocument, formatBackupSummary } from '../backup';
 import * as ANN from './annotations';
 
 const RULE_CONFIG_HANDLERS: Record<string, string> = {
@@ -8,6 +9,7 @@ const RULE_CONFIG_HANDLERS: Record<string, string> = {
 	get_by_name: 'pcb.drc.getRuleConfigByName',
 	get_all: 'pcb.drc.getAllRuleConfigs',
 	save: 'pcb.drc.saveRuleConfig',
+	overwrite_current: 'pcb.drc.overwriteCurrentRuleConfig',
 	rename: 'pcb.drc.renameRuleConfig',
 	delete: 'pcb.drc.deleteRuleConfig',
 	get_default_name: 'pcb.drc.getDefaultRuleConfigName',
@@ -62,27 +64,38 @@ export function pcbDrcTools(ctx: ToolContext): ToolDef[] {
 - get_current_name: get current active config name
 - get_by_name: get config by name (configurationName)
 - get_all: get all configs (includeSystem optional)
-- save: save config (ruleConfiguration, configurationName; allowOverwrite optional)
+- save: save config under a name (ruleConfiguration, configurationName; allowOverwrite optional)
+- overwrite_current: apply a config to the open board (ruleConfiguration); the document is backed up first
 - rename: rename config (originalName, newName)
 - delete: delete config (configurationName)
 - get_default_name: get default config name
 - set_default: set as default (configurationName)
+Only pass a configuration EasyEDA returned: take pcb_get_design_rules().config (the {config, name} result is also accepted) and edit it in place. A hand-built or malformed configuration is rejected before it reaches EasyEDA, because a failed save can corrupt EasyEDA's rule-config preference and hang Design Rules in every project; if that happens the error says so and gives the repair steps.
 Warning (upstream EDA bug, pro-api-sdk issue #34): saved rule changes read back correctly but do NOT affect pour reflow until the PCB document is closed and reopened. Reopen the document before rebuilding pours.`,
 			inputShape: withDocumentParam({
 				action: z
 					.enum([
-						'get_current_name', 'get_by_name', 'get_all', 'save',
+						'get_current_name', 'get_by_name', 'get_all', 'save', 'overwrite_current',
 						'rename', 'delete', 'get_default_name', 'set_default',
 					])
 					.describe('Action to perform'),
 				configurationName: z.string().optional().describe('Config name'),
-				ruleConfiguration: z.record(z.string(), z.any()).optional().describe('Rule config object (for save)'),
+				ruleConfiguration: z.record(z.string(), z.any()).optional().describe('Rule config object EasyEDA returned (for save, overwrite_current)'),
 				allowOverwrite: z.boolean().optional().describe('Allow overwrite (for save)'),
 				includeSystem: z.boolean().optional().describe('Include system configs (for get_all)'),
 				originalName: z.string().optional().describe('Current name (for rename)'),
 				newName: z.string().optional().describe('New name (for rename)'),
 			}),
 			handler: async ({ action, ...rest }) => {
+				if (action === 'overwrite_current') {
+					const backup = await backupDocument(ctx, {
+						instance_id: rest.instance_id,
+						document: rest.document,
+						toolName: 'pcb_manage_rule_config',
+					});
+					const result = await ctx.sendToExtension(RULE_CONFIG_HANDLERS[action], rest);
+					return { content: [{ type: 'text', text: JSON.stringify({ result, backup, note: formatBackupSummary(backup) }, null, 2) }] };
+				}
 				const result = await ctx.sendToExtension(RULE_CONFIG_HANDLERS[action], rest);
 				return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
 			},

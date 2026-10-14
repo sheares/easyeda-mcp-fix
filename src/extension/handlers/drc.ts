@@ -1,3 +1,83 @@
+// The reference makes the EDA Pro ambient globals (eda) resolvable when ts-node
+// compiles this module outside tsconfig.extension.json (handler unit tests).
+/// <reference types="@jlceda/pro-api-types" />
+import { BridgeUserError, describeError } from '../diag';
+
+/**
+ * pcb_get_design_rules returns {config, name}; the API wants only the config
+ * object (the 0.4.26 JSDoc examples pass `current.config`). Unwrap the
+ * envelope when that is what we were given.
+ */
+export function unwrapRuleConfiguration(input: unknown): unknown {
+	if (input && typeof input === 'object' && !Array.isArray(input)) {
+		const wrapped = input as Record<string, any>;
+		const { config, name } = wrapped;
+		if (config && typeof config === 'object' && !Array.isArray(config) && (name === undefined || typeof name === 'string')) {
+			return config;
+		}
+	}
+	return input;
+}
+
+/**
+ * Reject values that cannot be a rule configuration before EasyEDA sees them.
+ * Deliberately minimal (plain, non-empty object): it is meant to be tightened
+ * from a real config dump, so do not add key requirements here without one.
+ */
+export function assertPlausibleRuleConfiguration(config: unknown): asserts config is Record<string, any> {
+	const ok = config !== null && typeof config === 'object' && !Array.isArray(config) && Object.keys(config).length > 0;
+	if (!ok) {
+		throw new BridgeUserError(
+			'Refusing to send this rule configuration to EasyEDA: it is not a non-empty configuration object. ' +
+				'Pass the config returned by pcb_get_design_rules (its "config" field), edited in place. ' +
+				'A hand-built or malformed configuration can corrupt EasyEDA\'s rule-config preference and hang Design Rules in every project.',
+		);
+	}
+}
+
+const PREFERENCE_REPAIR_MESSAGE =
+	'EasyEDA rejected the rule configuration AND its saved rule-configuration list can no longer be read, so the rule-config preference is probably corrupted ' +
+	'(symptom: Design Rules hangs in every project with "t is not iterable"). No automatic repair was attempted. Repair: ' +
+	'(1) close EasyEDA and back up ~/Documents/EasyEDA-Pro/database/web.db; ' +
+	'(2) reopen it, and save a configuration that EasyEDA itself produced (the config from pcb_get_design_rules, unedited) under a temporary name; ' +
+	'(3) delete that temporary configuration; ' +
+	'(4) confirm pcb_manage_rule_config get_all (includeSystem false) returns an array.';
+
+/**
+ * Run a rule-config write. If it returns false or throws, check that the
+ * stored configuration list is still readable: on EasyEDA 3.2.149 a failed
+ * saveRuleConfiguration left the preference malformed. A loud error beats a
+ * silent "false" in that case.
+ */
+export async function guardedRuleConfigWrite(write: () => Promise<unknown>): Promise<unknown> {
+	let result: unknown;
+	let thrown: unknown;
+	let didThrow = false;
+	try {
+		result = await write();
+	} catch (err) {
+		didThrow = true;
+		thrown = err;
+	}
+	if (!didThrow && result !== false) return result;
+
+	let listOk = false;
+	try {
+		listOk = Array.isArray(await eda.pcb_Drc.getAllRuleConfigurations(false));
+	} catch {
+		listOk = false;
+	}
+	if (!listOk) {
+		throw new BridgeUserError(
+			didThrow ? `${PREFERENCE_REPAIR_MESSAGE} (original error: ${describeError(thrown)})` : PREFERENCE_REPAIR_MESSAGE,
+		);
+	}
+	if (didThrow) throw thrown;
+	throw new BridgeUserError(
+		'EasyEDA rejected the configuration (returned false). Only pass a configuration EasyEDA returned (pcb_get_design_rules), edited in place.',
+	);
+}
+
 export const drcHandlers: Record<string, (params: Record<string, any>) => Promise<any>> = {
 	// === DRC Check ===
 
@@ -39,11 +119,18 @@ export const drcHandlers: Record<string, (params: Record<string, any>) => Promis
 	},
 
 	'pcb.drc.saveRuleConfig': async (params) => {
-		return eda.pcb_Drc.saveRuleConfiguration(
-			params.ruleConfiguration,
-			params.configurationName,
-			params.allowOverwrite,
+		const config = unwrapRuleConfiguration(params.ruleConfiguration);
+		assertPlausibleRuleConfiguration(config);
+		return guardedRuleConfigWrite(() =>
+			eda.pcb_Drc.saveRuleConfiguration(config, params.configurationName, params.allowOverwrite),
 		);
+	},
+
+	// Applies a rule set to the open board (save only stores it by name).
+	'pcb.drc.overwriteCurrentRuleConfig': async (params) => {
+		const config = unwrapRuleConfiguration(params.ruleConfiguration);
+		assertPlausibleRuleConfiguration(config);
+		return guardedRuleConfigWrite(() => eda.pcb_Drc.overwriteCurrentRuleConfiguration(config));
 	},
 
 	'pcb.drc.renameRuleConfig': async (params) => {
