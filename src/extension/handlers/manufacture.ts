@@ -1,6 +1,5 @@
 import { csvToRows } from './csv';
 import { selectFabLayers, type FabLayerInfo } from './fab-layers';
-import { BridgeUserError } from '../diag';
 
 async function fileToBase64(file: File): Promise<string> {
 	return new Promise((resolve, reject) => {
@@ -120,29 +119,6 @@ export const manufactureHandlers: Record<string, (params: Record<string, any>) =
 		);
 		if (!file) throw new Error('getBomFile returned no file');
 		return csvToRows(await file.text());
-	},
-
-	// Schematic image export. A multi-page SVG comes back as a zip (EDA decides);
-	// the file name EDA returns says which. Both need EDA 3.2.183+.
-	'sch.manufacture.getSvgFile': async (params) => {
-		const m = eda.sch_ManufactureData as any;
-		if (typeof m.getSvgFile !== 'function') {
-			throw new BridgeUserError('sch_ManufactureData.getSvgFile is not available in this EasyEDA Pro build (needs a newer version)');
-		}
-		const file = await withExportTimeout<File | undefined>(m.getSvgFile(params.fileName), 'sch_ManufactureData.getSvgFile');
-		return exportFile(file);
-	},
-
-	'sch.manufacture.getPngFile': async (params) => {
-		const m = eda.sch_ManufactureData as any;
-		if (typeof m.getPngFile !== 'function') {
-			throw new BridgeUserError('sch_ManufactureData.getPngFile is not available in this EasyEDA Pro build (needs a newer version)');
-		}
-		const resolution = params.width != null || params.height != null
-			? { width: params.width, height: params.height }
-			: undefined;
-		const file = await withExportTimeout<File | undefined>(m.getPngFile(params.fileName, resolution), 'sch_ManufactureData.getPngFile');
-		return exportFile(file);
 	},
 
 	'pcb.manufacture.getPickAndPlaceFile': async (params) => {

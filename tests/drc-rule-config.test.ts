@@ -33,7 +33,20 @@ beforeEach(() => {
 	};
 });
 
-const CONFIG = { Physical: { Track: { min: 6 } } };
+// Trimmed from a real pcb_get_design_rules().config (EasyEDA 3.2.206).
+const CONFIG = {
+	Physics: {
+		Track: {
+			copperThickness1oz: {
+				editName: 'copperThickness1oz',
+				unit: 'mm',
+				isSetDefault: true,
+				form: { status: 1, data: { 1: { minValue: 0.102, defaultValue: 0.254, maxValue: 2.54 } } },
+			},
+		},
+		'Blind/Buried Via': { blindVia: { editName: 'blindVia', isSetDefault: true, table: [] } },
+	},
+};
 
 test('unwrapRuleConfiguration passes .config of a {config, name} envelope and leaves a bare config alone', () => {
 	assert.equal(unwrapRuleConfiguration({ config: CONFIG, name: 'Default' }), CONFIG);
@@ -63,6 +76,18 @@ test('pre-check rejects non-objects, arrays and empty objects before EDA is call
 	assert.equal(saved.length, 0);
 	assert.throws(() => assertPlausibleRuleConfiguration({}), /pcb_get_design_rules/);
 	assert.doesNotThrow(() => assertPlausibleRuleConfiguration(CONFIG));
+});
+
+test('pre-check rejects hand-built configs that lack the category/group/rule-set shape', () => {
+	const handBuilt = [
+		{ Physics: { Track: { min: 6 } } },
+		{ Physics: { Track: { pwr: { min: 0.5 } } } },
+		{ Physics: 'Track' },
+		{ Physics: { Track: [] } },
+	];
+	for (const bad of handBuilt) {
+		assert.throws(() => assertPlausibleRuleConfiguration(bad), /editName|not an object/);
+	}
 });
 
 test('false return with a readable list gives a normal rejection message', async () => {

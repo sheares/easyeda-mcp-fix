@@ -163,62 +163,6 @@ ${OPTIONS_HINT}`,
 		},
 
 		{
-			name: 'sch_export_image_to_file',
-			annotations: ANN.WRITE_LOCAL_FILE,
-			description: `Export the current schematic as an SVG or PNG image directly to a local file path.
-Needs a recent EasyEDA Pro build (3.2.183+); older builds get a clear error.
-
-SVG: a schematic with several sheets is exported by EasyEDA as a zip archive, so give filePath a
-.zip name in that case (the saved file's originalName shows what EasyEDA produced).
-PNG: pass width and/or height in pixels (max 4096 each); give just one and the other follows the
-aspect ratio. Omit both for the default 1x size.
-
-Returns { saved: path, size, originalName, format }.`,
-			inputShape: withDocumentParam({
-				format: z.enum(['svg', 'png']).describe('Image format'),
-				filePath: z.string().describe('Absolute path to write the exported file to'),
-				fileName: z.string().optional().describe('File name passed to EasyEDA (affects originalName only)'),
-				width: z.number().int().positive().max(4096).optional().describe('PNG width in pixels (max 4096)'),
-				height: z.number().int().positive().max(4096).optional().describe('PNG height in pixels (max 4096)'),
-			}),
-			handler: async ({ format, filePath, ...rest }) => {
-				if (!isAbsolute(filePath)) {
-					throw new Error(
-						`sch_export_image_to_file requires an absolute filePath; got ${JSON.stringify(filePath)}. ` +
-						`Relative paths would land in the daemon's CWD (typically the user's home directory), ` +
-						`making the file hard to locate.`,
-					);
-				}
-				const method = format === 'svg' ? 'sch.manufacture.getSvgFile' : 'sch.manufacture.getPngFile';
-				const result = await ctx.sendToExtension(method, rest) as {
-					fileName?: string;
-					data?: string;
-					size?: number;
-				};
-				if (typeof result?.data !== 'string') {
-					throw new Error(
-						`sch_export_image_to_file: extension returned unexpected shape for format=${format} ` +
-						`(missing or non-string 'data' field). Got keys: ${result ? Object.keys(result).join(',') : '(null)'}`,
-					);
-				}
-				const raw = Buffer.from(result.data, 'base64');
-				await mkdir(dirname(filePath), { recursive: true });
-				await writeFile(filePath, raw);
-				return {
-					content: [{
-						type: 'text',
-						text: JSON.stringify({
-							saved: filePath,
-							size: raw.length,
-							originalName: result.fileName,
-							format,
-						}, null, 2),
-					}],
-				};
-			},
-		},
-
-		{
 			name: 'pcb_import',
 			annotations: ANN.DESTRUCTIVE,
 			description: `Import routing or layout result files into the PCB (Base64-encoded).

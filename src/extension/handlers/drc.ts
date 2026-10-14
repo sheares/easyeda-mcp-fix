@@ -19,19 +19,37 @@ export function unwrapRuleConfiguration(input: unknown): unknown {
 	return input;
 }
 
+const isPlainObject = (v: unknown): v is Record<string, any> =>
+	v !== null && typeof v === 'object' && !Array.isArray(v);
+
 /**
- * Reject values that cannot be a rule configuration before EasyEDA sees them.
- * Deliberately minimal (plain, non-empty object): it is meant to be tightened
- * from a real config dump, so do not add key requirements here without one.
+ * Reject values that cannot be EasyEDA's own rule configuration before
+ * EasyEDA sees them. The shape comes from a real config read on 3.2.206
+ * (pcb_get_design_rules().config): category ("Spacing", "Physics", "Plane",
+ * "Expansion") -> rule group ("Track", "Via Size", ...) -> rule set, and every
+ * rule set carries a string `editName`. The check is structural, not by key
+ * name, so it holds for any UI language. Hand-built configs (the kind that
+ * corrupted the preference on 3.2.149) fail it.
  */
 export function assertPlausibleRuleConfiguration(config: unknown): asserts config is Record<string, any> {
-	const ok = config !== null && typeof config === 'object' && !Array.isArray(config) && Object.keys(config).length > 0;
-	if (!ok) {
+	const refuse = (why: string): never => {
 		throw new BridgeUserError(
-			'Refusing to send this rule configuration to EasyEDA: it is not a non-empty configuration object. ' +
+			`Refusing to send this rule configuration to EasyEDA: ${why}. ` +
 				'Pass the config returned by pcb_get_design_rules (its "config" field), edited in place. ' +
 				'A hand-built or malformed configuration can corrupt EasyEDA\'s rule-config preference and hang Design Rules in every project.',
 		);
+	};
+	if (!isPlainObject(config) || Object.keys(config).length === 0) refuse('it is not a non-empty configuration object');
+	for (const [category, groups] of Object.entries(config as Record<string, unknown>)) {
+		if (!isPlainObject(groups)) refuse(`category "${category}" is not an object of rule groups`);
+		for (const [group, sets] of Object.entries(groups as Record<string, unknown>)) {
+			if (!isPlainObject(sets)) refuse(`rule group "${category}/${group}" is not an object of rule sets`);
+			for (const [name, set] of Object.entries(sets as Record<string, unknown>)) {
+				if (!isPlainObject(set) || typeof set.editName !== 'string') {
+					refuse(`rule set "${category}/${group}/${name}" has no editName, so it is not in EasyEDA's own format`);
+				}
+			}
+		}
 	}
 }
 

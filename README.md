@@ -161,9 +161,8 @@ handshake there: 3.2.206 sandboxes have no `crypto.subtle`, so the HMAC now
 falls back to a built-in SHA-256. It also fixed the default Gerber and
 ODB++ layer set, which had left out silk, mask, paste, outline and plane
 layers, and pad, region, via and fill parameters that never reached EasyEDA
-in the form it needs, and it guards rule-config saves. New tools: pour
-rebuild, library footprint and symbol source reads, and schematic SVG/PNG
-export.
+in the form it needs, and it guards rule-config saves. New tool: pour
+rebuild.
 
 ### Environment variables
 
