@@ -91,8 +91,23 @@ export class ToolRegistry {
 		if (!entry) {
 			throw new Error(`Unknown tool: ${name}`);
 		}
-		return annotateOversizedResult(name, args, await entry.def.handler(args));
+		return annotateOversizedResult(name, args, ensureTextBlocks(await entry.def.handler(args)));
 	}
+}
+
+/**
+ * Tools format results with JSON.stringify(result), which gives undefined when
+ * EasyEDA resolves with nothing (get_by_name on a missing name, for one). A text
+ * block without a string fails the client's result validation, so the caller
+ * saw "Invalid tools/call result" instead of an answer. Report it as null.
+ */
+export function ensureTextBlocks(result: CallToolResult): CallToolResult {
+	const content = Array.isArray(result?.content) ? result.content : null;
+	if (!content || content.every((b) => b?.type !== 'text' || typeof b.text === 'string')) return result;
+	return {
+		...result,
+		content: content.map((b) => (b?.type === 'text' && typeof b.text !== 'string' ? { ...b, text: 'null' } : b)),
+	};
 }
 
 /** Above this many bytes of text content, a result gets a cost note appended. */

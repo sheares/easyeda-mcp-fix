@@ -32,3 +32,15 @@ test('non-text blocks are not counted and malformed results are left alone', () 
 	const malformed = { content: undefined as any };
 	assert.equal(annotateOversizedResult('x', {}, malformed), malformed);
 });
+
+test('a text block whose text is undefined becomes "null"; good results pass through as the same object', async () => {
+	const { ensureTextBlocks } = await import('../src/bridge-daemon/registry');
+	const good = { content: [{ type: 'text' as const, text: 'true' }] };
+	assert.equal(ensureTextBlocks(good), good);
+	// what JSON.stringify(undefined) produces when EasyEDA resolves with nothing
+	const empty = { content: [{ type: 'text', text: JSON.stringify(undefined) }] } as any;
+	const out = ensureTextBlocks(empty);
+	assert.deepEqual(out.content, [{ type: 'text', text: 'null' }]);
+	const image = { content: [{ type: 'image' as const, data: 'x', mimeType: 'image/png' }] };
+	assert.equal(ensureTextBlocks(image), image);
+});
