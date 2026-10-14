@@ -99,6 +99,22 @@ test('reports failures when the fallback is absent or throws', async () => {
 	result = await pourFillHandlers['pcb.pour.rebuild']({});
 	assert.equal(result.failed.length, 2);
 	assert.match(result.failed[1].reason, /alpha broke/);
+	assert.match(result.note, /Shift\+B/);
+});
+
+test('a failure inside EasyEDA is reported by its first line, with no note when something was rebuilt', async () => {
+	const inside = new TypeError("Cannot read properties of undefined (reading 'length')");
+	inside.stack = `${inside.name}: ${inside.message}\n    at C3 (https://modules.lceda.cn/pro-api/api.js:38:75929)`;
+	pours = [pour('a', async () => { throw inside; })];
+	let result: any = await pourFillHandlers['pcb.pour.rebuild']({});
+	assert.equal(result.failed[0].reason.includes('\n'), false);
+	assert.match(result.failed[0].reason, /reading 'length'/);
+	assert.match(result.note, /Shift\+B/);
+
+	pours = [pour('a', async () => { throw inside; }), pour('b', async () => ({}))];
+	result = await pourFillHandlers['pcb.pour.rebuild']({});
+	assert.deepEqual(result.rebuilt, ['b']);
+	assert.equal('note' in result, false);
 });
 
 test('no pours gives an empty result', async () => {

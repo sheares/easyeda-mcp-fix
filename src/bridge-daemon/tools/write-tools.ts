@@ -193,7 +193,7 @@ Examples:
 			name: 'pcb_rebuild_pours',
 			annotations: ANN.WRITE_MODIFY,
 			description:
-				'Rebuild (re-fill) copper pours so they reflect the current tracks, pads, vias and rules. This replaces the manual "rebuild all copper" step in the EasyEDA app. Pass primitiveIds to rebuild specific pours, or omit it to rebuild every pour. Returns which pours were rebuilt and which failed with a reason, never the poured geometry. Note: EasyEDA may fail to rebuild a pour that was created through the API; the failure is reported per pour. Warning (upstream EDA bug, pro-api-sdk issue #34): pours reflow using the design-rule snapshot taken when the document was opened, so rule changes written via the API do not take effect until the PCB document is closed and reopened; reopen it before rebuilding after rule changes. Rebuilding does not cut internal-plane anti-pads for different-net vias created after plane generation (issue #32).',
+				'Rebuild (re-fill) copper pours so they reflect the current tracks, pads, vias and rules. This replaces the manual "rebuild all copper" step in the EasyEDA app. Pass primitiveIds to rebuild specific pours, or omit it to rebuild every pour. Returns which pours were rebuilt and which failed with a reason, never the poured geometry. Note: on EasyEDA Pro 3.2.206, EasyEDA cannot rebuild a pour that was created through the API; the failure is reported per pour, with a note telling you to ask the user to rebuild all copper in the PCB editor (Shift+B). Warning (upstream EDA bug, pro-api-sdk issue #34): pours reflow using the design-rule snapshot taken when the document was opened, so rule changes written via the API do not take effect until the PCB document is closed and reopened; reopen it before rebuilding after rule changes. Rebuilding does not cut internal-plane anti-pads for different-net vias created after plane generation (issue #32).',
 			inputShape: withDocumentParam({
 				primitiveIds: z.array(z.string()).optional().describe('Pour primitive IDs to rebuild (omit to rebuild all pours)'),
 			}),
@@ -206,7 +206,7 @@ Examples:
 		{
 			name: 'pcb_create_fill',
 			annotations: ANN.WRITE_CREATE,
-			description: `Create a fill region on the PCB. ${PCB_COORD_NOTE}`,
+			description: `Create a fill region on the PCB. The result is read back from the board, and notApplied lists any requested value EasyEDA did not keep (EasyEDA Pro 3.2.206 stores every fill as solid with a 0.2 outline width, whatever fillMode and lineWidth say). ${PCB_COORD_NOTE}`,
 			inputShape: withDocumentParam({
 				layer: layerParam(LAYER_DESC),
 				polygon: closedPolygonParam,
@@ -226,7 +226,7 @@ Examples:
 		{
 			name: 'pcb_create_region',
 			annotations: ANN.WRITE_CREATE,
-			description: `Create a design rule region (keepout/constraint area) on the PCB. ${PCB_COORD_NOTE}`,
+			description: `Create a design rule region (keepout/constraint area) on the PCB. The result is read back from the board, and notApplied lists any requested value EasyEDA did not keep (EasyEDA Pro 3.2.206 keeps the rule types but not regionName or lineWidth). ${PCB_COORD_NOTE}`,
 			inputShape: withDocumentParam({
 				layer: layerParam(LAYER_DESC),
 				polygon: closedPolygonParam,
@@ -295,7 +295,7 @@ Examples:
 - pour: net, layer, pourFillMethod, preserveSilos, pourName, pourPriority, lineWidth
 - fill: layer, net, fillMode ("solid"/"mesh"/"inner_electrical_layer" or 0/1/2), lineWidth
 - region: layer, ruleType (array of "no_components"/"no_wires"/"no_fills"/"no_pours"/"no_inner_layers"/"follow_region_rule" or 2/5/6/7/8/9), regionName, lineWidth
-Enum names are converted to the numeric values EasyEDA requires.
+Enum names are converted to the numeric values EasyEDA requires. Fill and region results are read back from the board, with notApplied listing any requested value EasyEDA did not keep.
 All types support: primitiveLock
 ${PCB_COORD_NOTE}`,
 			inputShape: withDocumentParam({

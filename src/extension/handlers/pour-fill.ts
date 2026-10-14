@@ -2,7 +2,22 @@
 // compiles this module outside tsconfig.extension.json (handler unit tests).
 /// <reference types="@jlceda/pro-api-types" />
 import { toClosedPolygonSource } from './pcb-params';
+import { readBackPrimitive } from './read-back';
 import { describeError } from '../diag';
+
+// On 3.2.206 the per-pour call fails inside EasyEDA for pours created through
+// the API (its own docs say so: the wrapper always sends isLast:false, gets
+// nothing back and reads .length of it), and rebuildCopperRegions is not in
+// the runtime at all. So say plainly what the caller has to do instead.
+const REBUILD_FAILED_NOTE =
+	'EasyEDA could not rebuild these pours through its API (on EasyEDA Pro 3.2.206 this happens for pours created through the API). ' +
+	'Ask the user to rebuild all copper in the PCB editor (Shift+B), then read the board again.';
+
+// The stack trace of an error thrown inside EasyEDA points into its own
+// bundle and does not help the caller.
+function firstLine(text: string): string {
+	return text.split('\n')[0];
+}
 
 export const pourFillHandlers: Record<string, (params: Record<string, any>) => Promise<any>> = {
 	// === Pour ===
@@ -77,7 +92,7 @@ export const pourFillHandlers: Record<string, (params: Record<string, any>) => P
 					pouredCount++;
 				}
 			} catch (err) {
-				failed.push({ id, reason: describeError(err) });
+				failed.push({ id, reason: firstLine(describeError(err)) });
 			}
 		}
 
@@ -93,16 +108,18 @@ export const pourFillHandlers: Record<string, (params: Record<string, any>) => P
 					pouredCount: count,
 				};
 			} catch (err) {
-				failed.push({ id: ids ? ids.join(',') : 'all', reason: `rebuildCopperRegions: ${describeError(err)}` });
+				failed.push({ id: ids ? ids.join(',') : 'all', reason: `rebuildCopperRegions: ${firstLine(describeError(err))}` });
 			}
 		}
 
-		return {
+		const result: Record<string, unknown> = {
 			method: instanceCalls > 0 ? 'rebuildCopperRegion' : 'none',
 			rebuilt,
 			failed,
 			pouredCount,
 		};
+		if (rebuilt.length === 0 && failed.length > 0) result.note = REBUILD_FAILED_NOTE;
+		return result;
 	},
 
 	// === Fill ===
@@ -120,7 +137,7 @@ export const pourFillHandlers: Record<string, (params: Record<string, any>) => P
 		if (!polygon) {
 			throw new Error('Invalid polygon data');
 		}
-		return eda.pcb_PrimitiveFill.create(
+		const made = await eda.pcb_PrimitiveFill.create(
 			params.layer,
 			polygon,
 			params.net,
@@ -128,10 +145,17 @@ export const pourFillHandlers: Record<string, (params: Record<string, any>) => P
 			params.lineWidth,
 			params.primitiveLock,
 		);
+		return readBackPrimitive(eda.pcb_PrimitiveFill, made, {
+			layer: params.layer,
+			net: params.net,
+			fillMode: params.fillMode,
+			lineWidth: params.lineWidth,
+		});
 	},
 
 	'pcb.modify.fill': async (params) => {
-		return eda.pcb_PrimitiveFill.modify(params.primitiveId, params.property);
+		const made = await eda.pcb_PrimitiveFill.modify(params.primitiveId, params.property);
+		return readBackPrimitive(eda.pcb_PrimitiveFill, made, params.property ?? {});
 	},
 
 	'pcb.delete.fill': async (params) => {

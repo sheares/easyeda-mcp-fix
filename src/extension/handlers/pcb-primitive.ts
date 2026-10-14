@@ -1,4 +1,5 @@
 import { toClosedPolygonSource } from './pcb-params';
+import { readBackPrimitive } from './read-back';
 
 export const pcbPrimitiveHandlers: Record<string, (params: Record<string, any>) => Promise<any>> = {
 	// === Arc ===
@@ -49,7 +50,7 @@ export const pcbPrimitiveHandlers: Record<string, (params: Record<string, any>) 
 		if (!polygon) {
 			throw new Error('Invalid polygon data');
 		}
-		return eda.pcb_PrimitiveRegion.create(
+		const made = await eda.pcb_PrimitiveRegion.create(
 			params.layer,
 			polygon,
 			params.ruleType,
@@ -57,10 +58,17 @@ export const pcbPrimitiveHandlers: Record<string, (params: Record<string, any>) 
 			params.lineWidth,
 			params.primitiveLock,
 		);
+		return readBackPrimitive(eda.pcb_PrimitiveRegion, made, {
+			layer: params.layer,
+			ruleType: params.ruleType,
+			regionName: params.regionName,
+			lineWidth: params.lineWidth,
+		});
 	},
 
 	'pcb.modify.region': async (params) => {
-		return eda.pcb_PrimitiveRegion.modify(params.primitiveId, params.property);
+		const made = await eda.pcb_PrimitiveRegion.modify(params.primitiveId, params.property);
+		return readBackPrimitive(eda.pcb_PrimitiveRegion, made, params.property ?? {});
 	},
 
 	'pcb.delete.region': async (params) => {
