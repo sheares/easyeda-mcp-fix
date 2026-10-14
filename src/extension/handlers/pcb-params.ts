@@ -54,18 +54,105 @@ export function toLayerId(layer: unknown): unknown {
 	);
 }
 
+// Same dead-value bug as layers, for the other numeric enums: region ruleType
+// (EPCB_PrimitiveRegionRuleType), via viaType (EPCB_PrimitiveViaType) and fill
+// fillMode (EPCB_PrimitiveFillMode). Callers naturally send names, EasyEDA
+// stored the string verbatim, and for regions it then saved an empty rule (no
+// error). Convert names to the numeric value before any eda.* call.
+const REGION_RULE_NAME_TO_ID: Record<string, number> = {
+	nocomponents: 2,
+	nowires: 5,
+	norouting: 5,
+	notracks: 5,
+	nofills: 6,
+	nopours: 7,
+	nopour: 7,
+	noinnerlayers: 8,
+	noinnerelectricallayers: 8,
+	followregionrule: 9,
+	constraint: 9,
+};
+
+const VIA_TYPE_NAME_TO_ID: Record<string, number> = {
+	via: 0,
+	through: 0,
+	throughhole: 0,
+	blind: 1,
+	buried: 1,
+	blindburied: 1,
+	suture: 2,
+	stitching: 2,
+};
+
+const FILL_MODE_NAME_TO_ID: Record<string, number> = {
+	solid: 0,
+	mesh: 1,
+	grid: 1,
+	innerelectricallayer: 2,
+	innerlayer: 2,
+	plane: 2,
+};
+
+function toEnumId(value: unknown, table: Record<string, number>, label: string, valid: string): unknown {
+	if (value == null || typeof value === 'number') return value;
+	if (typeof value !== 'string') return value;
+	const trimmed = value.trim();
+	if (/^\d+$/.test(trimmed)) return Number(trimmed);
+	const id = table[trimmed.toLowerCase().replace(/[^a-z0-9]/g, '')];
+	if (id !== undefined) return id;
+	throw new Error(`Unknown ${label} "${value}". Use ${valid}, or the numeric value.`);
+}
+
 /**
- * Normalise layer-carrying params for pcb.* handler methods: `layer` at the top
- * level plus `layer`/`layerId` inside a modify `property` object.
+ * Region rule type(s): one value or an array. Names ("no_components",
+ * "no_wires"/"no_routing", "no_fills", "no_pours", "no_inner_layers",
+ * "follow_region_rule"), numbers or numeric strings.
+ */
+export function toRegionRuleType(ruleType: unknown): unknown {
+	const one = (v: unknown) =>
+		toEnumId(
+			v,
+			REGION_RULE_NAME_TO_ID,
+			'region rule type',
+			'no_components (2), no_wires (5), no_fills (6), no_pours (7), no_inner_layers (8) or follow_region_rule (9)',
+		);
+	return Array.isArray(ruleType) ? ruleType.map(one) : one(ruleType);
+}
+
+/** Via type: "via"/"through" (0), "blind"/"buried" (1), "suture" (2), or the number. */
+export function toViaType(viaType: unknown): unknown {
+	return toEnumId(viaType, VIA_TYPE_NAME_TO_ID, 'via type', 'through (0), blind (1) or suture (2)');
+}
+
+/** Fill mode: "solid" (0), "mesh" (1), "inner_electrical_layer" (2), or the number. */
+export function toFillMode(fillMode: unknown): unknown {
+	return toEnumId(fillMode, FILL_MODE_NAME_TO_ID, 'fill mode', 'solid (0), mesh (1) or inner_electrical_layer (2)');
+}
+
+/** Pick the enum converter for a pcb.* method by its primitive-type suffix. */
+function enumFieldFor(method: string): [string, (v: unknown) => unknown] | undefined {
+	if (method.endsWith('.region')) return ['ruleType', toRegionRuleType];
+	if (method.endsWith('.via')) return ['viaType', toViaType];
+	if (method.endsWith('.fill')) return ['fillMode', toFillMode];
+	return undefined;
+}
+
+/**
+ * Normalise layer- and enum-carrying params for pcb.* handler methods: `layer`
+ * at the top level plus `layer`/`layerId` inside a modify `property` object,
+ * and the per-type enum field (see enumFieldFor) in both places.
  */
 export function normalizePcbParams(method: string, params: Record<string, any>): Record<string, any> {
 	if (!method.startsWith('pcb.')) return params;
 	const out = { ...params };
+	const enumField = enumFieldFor(method);
 	if (typeof out.layer === 'string') out.layer = toLayerId(out.layer);
+	if (enumField && out[enumField[0]] != null) out[enumField[0]] = enumField[1](out[enumField[0]]);
 	if (out.property && typeof out.property === 'object' && !Array.isArray(out.property)) {
 		const property = { ...out.property };
 		if (typeof property.layer === 'string') property.layer = toLayerId(property.layer);
 		if (typeof property.layerId === 'string') property.layerId = toLayerId(property.layerId);
+		if (enumField && property[enumField[0]] != null) property[enumField[0]] = enumField[1](property[enumField[0]]);
 		out.property = property;
 	}
 	return out;

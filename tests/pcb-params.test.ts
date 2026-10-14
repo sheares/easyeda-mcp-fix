@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import * as assert from 'node:assert/strict';
-import { toLayerId, normalizePcbParams, toPolygonSource, toClosedPolygonSource } from '../src/extension/handlers/pcb-params';
+import { toLayerId, normalizePcbParams, toPolygonSource, toClosedPolygonSource, toRegionRuleType, toViaType, toFillMode } from '../src/extension/handlers/pcb-params';
 
 test('toLayerId maps documented layer names to numeric EPCB_LayerId', () => {
 	assert.equal(toLayerId('TopLayer'), 1);
@@ -112,4 +112,46 @@ test('toClosedPolygonSource passes flat source arrays and non-arrays through unt
 	assert.equal(toClosedPolygonSource(source), source);
 	assert.equal(toClosedPolygonSource(undefined), undefined);
 	assert.deepEqual(toClosedPolygonSource([]), []);
+});
+
+test('toRegionRuleType maps names, numbers and numeric strings, singly or in arrays', () => {
+	assert.deepEqual(toRegionRuleType(['no_components', 'no_wires']), [2, 5]);
+	assert.deepEqual(toRegionRuleType(['No-Routing', 'NO_FILLS', 'noPours', 'no_inner_layers', 'follow_region_rule']), [5, 6, 7, 8, 9]);
+	assert.deepEqual(toRegionRuleType([2, '5']), [2, 5]);
+	assert.equal(toRegionRuleType('no_pours'), 7);
+	assert.equal(toRegionRuleType(undefined), undefined);
+});
+
+test('toRegionRuleType rejects unknown names and lists the valid ones', () => {
+	assert.throws(() => toRegionRuleType(['no_gold']), /Unknown region rule type "no_gold".*no_components/);
+});
+
+test('toViaType and toFillMode map names and pass numbers through', () => {
+	assert.equal(toViaType('Through'), 0);
+	assert.equal(toViaType('BlindBuried'), 1);
+	assert.equal(toViaType('suture'), 2);
+	assert.equal(toViaType(1), 1);
+	assert.equal(toViaType('2'), 2);
+	assert.throws(() => toViaType('laser'), /Unknown via type/);
+	assert.equal(toFillMode('solid'), 0);
+	assert.equal(toFillMode('Mesh'), 1);
+	assert.equal(toFillMode('inner_electrical_layer'), 2);
+	assert.equal(toFillMode(0), 0);
+	assert.throws(() => toFillMode('hatched'), /Unknown fill mode/);
+});
+
+test('normalizePcbParams converts the enum field by method suffix, top level and in property', () => {
+	assert.deepEqual(normalizePcbParams('pcb.create.region', { ruleType: ['no_components', 'no_wires'] }).ruleType, [2, 5]);
+	assert.deepEqual(normalizePcbParams('pcb.getAll.region', { ruleType: ['no_pours'] }).ruleType, [7]);
+	assert.deepEqual(normalizePcbParams('pcb.modify.region', { property: { ruleType: ['no_fills'] } }).property, { ruleType: [6] });
+	assert.equal(normalizePcbParams('pcb.create.via', { viaType: 'Through' }).viaType, 0);
+	assert.equal(normalizePcbParams('pcb.modify.via', { property: { viaType: 'blind' } }).property.viaType, 1);
+	assert.equal(normalizePcbParams('pcb.create.fill', { fillMode: 'mesh' }).fillMode, 1);
+	assert.equal(normalizePcbParams('pcb.modify.fill', { property: { fillMode: 'solid' } }).property.fillMode, 0);
+});
+
+test('normalizePcbParams leaves other methods and unset enum fields alone', () => {
+	assert.deepEqual(normalizePcbParams('pcb.create.pad', { viaType: 'Through' }), { viaType: 'Through' });
+	assert.deepEqual(normalizePcbParams('pcb.create.region', {}), {});
+	assert.throws(() => normalizePcbParams('pcb.create.region', { ruleType: ['bogus'] }), /Unknown region rule type/);
 });

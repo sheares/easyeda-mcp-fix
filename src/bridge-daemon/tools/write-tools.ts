@@ -96,7 +96,10 @@ export function writeTools(ctx: ToolContext): ToolDef[] {
 				y: z.number().describe('Y coordinate'),
 				holeDiameter: z.number().describe('Hole diameter'),
 				diameter: z.number().describe('Via pad diameter'),
-				viaType: z.string().optional().describe('Via type (e.g. "Through", "BlindBuried")'),
+				viaType: z
+					.union([z.string(), z.number()])
+					.optional()
+					.describe('Via type: "through" (0, default), "blind" (1, blind/buried) or "suture" (2, stitching), or the number. Names are converted to the numeric value EasyEDA requires.'),
 			}),
 			handler: async (params) => {
 				const result = await ctx.sendToExtension('pcb.create.via', params);
@@ -127,14 +130,37 @@ export function writeTools(ctx: ToolContext): ToolDef[] {
 		{
 			name: 'pcb_create_pad',
 			annotations: ANN.WRITE_CREATE,
-			description: `Create a standalone pad on the PCB. ${PCB_COORD_NOTE}`,
+			description: `Create a standalone pad on the PCB. \`pad\` (the shape) is required; sizes and hole dimensions are in mil. ${PCB_COORD_NOTE}
+Shapes: ['ELLIPSE'|'OVAL'|'NGON', width, height], ['RECT', width, height, cornerRadius], or ['POLYGON', source] where source is [{x, y}, ...] or a raw L-mode source array. Holes: ['ROUND', diameter] or ['SLOT', width, height]; null or omitted for an SMD pad.
+Examples:
+- SMD pad: layer 1, padNumber "1", pad ['ELLIPSE', 60, 60], hole null.
+- Through-hole pad: layer 12 (Multi), padNumber "1", pad ['ELLIPSE', 80, 80], hole ['ROUND', 35], metallization true.`,
 			inputShape: withDocumentParam({
 				layer: layerParam(LAYER_DESC),
 				padNumber: z.string().describe('Pad number/name'),
 				x: z.number().describe('X coordinate'),
 				y: z.number().describe('Y coordinate'),
 				rotation: z.number().optional().describe('Rotation angle in degrees'),
+				pad: z
+					.union([
+						z.tuple([z.enum(['ELLIPSE', 'OVAL', 'NGON']), z.number(), z.number()]),
+						z.tuple([z.literal('RECT'), z.number(), z.number(), z.number()]),
+						z.tuple([z.literal('POLYGON'), z.array(z.any())]),
+					])
+					.describe("Pad shape: ['ELLIPSE'|'OVAL'|'NGON', width, height], ['RECT', width, height, cornerRadius] or ['POLYGON', source]. Mil."),
 				net: z.string().optional().describe('Net name'),
+				hole: z
+					.union([
+						z.tuple([z.literal('ROUND'), z.number()]),
+						z.tuple([z.literal('SLOT'), z.number(), z.number()]),
+					])
+					.nullable()
+					.optional()
+					.describe("Drill hole: ['ROUND', diameter] or ['SLOT', width, height] in mil; null or omitted for an SMD pad"),
+				holeOffsetX: z.number().optional().describe('Hole X offset from the pad centre (mil)'),
+				holeOffsetY: z.number().optional().describe('Hole Y offset from the pad centre (mil)'),
+				holeRotation: z.number().optional().describe('Hole rotation in degrees'),
+				metallization: z.boolean().optional().describe('Whether the hole is plated (true for a normal through-hole pad)'),
 			}),
 			handler: async (params) => {
 				const result = await ctx.sendToExtension('pcb.create.pad', params);
@@ -164,6 +190,20 @@ export function writeTools(ctx: ToolContext): ToolDef[] {
 		},
 
 		{
+			name: 'pcb_rebuild_pours',
+			annotations: ANN.WRITE_MODIFY,
+			description:
+				'Rebuild (re-fill) copper pours so they reflect the current tracks, pads, vias and rules. This replaces the manual "rebuild all copper" step in the EasyEDA app. Pass primitiveIds to rebuild specific pours, or omit it to rebuild every pour. Returns which pours were rebuilt and which failed with a reason, never the poured geometry. Note: EasyEDA may fail to rebuild a pour that was created through the API; the failure is reported per pour. Warning (upstream EDA bug, pro-api-sdk issue #34): pours reflow using the design-rule snapshot taken when the document was opened, so rule changes written via the API do not take effect until the PCB document is closed and reopened; reopen it before rebuilding after rule changes. Rebuilding does not cut internal-plane anti-pads for different-net vias created after plane generation (issue #32).',
+			inputShape: withDocumentParam({
+				primitiveIds: z.array(z.string()).optional().describe('Pour primitive IDs to rebuild (omit to rebuild all pours)'),
+			}),
+			handler: async (params) => {
+				const result = await ctx.sendToExtension('pcb.pour.rebuild', params);
+				return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
+			},
+		},
+
+		{
 			name: 'pcb_create_fill',
 			annotations: ANN.WRITE_CREATE,
 			description: `Create a fill region on the PCB. ${PCB_COORD_NOTE}`,
@@ -171,6 +211,10 @@ export function writeTools(ctx: ToolContext): ToolDef[] {
 				layer: layerParam(LAYER_DESC),
 				polygon: closedPolygonParam,
 				net: z.string().optional().describe('Net name'),
+				fillMode: z
+					.union([z.string(), z.number()])
+					.optional()
+					.describe('Fill mode: "solid" (0), "mesh" (1) or "inner_electrical_layer" (2), or the number. Names are converted to the numeric value EasyEDA requires.'),
 				lineWidth: z.number().optional().describe('Line width'),
 			}),
 			handler: async (params) => {
@@ -186,7 +230,10 @@ export function writeTools(ctx: ToolContext): ToolDef[] {
 			inputShape: withDocumentParam({
 				layer: layerParam(LAYER_DESC),
 				polygon: closedPolygonParam,
-				ruleType: z.array(z.string()).optional().describe('Rule type(s) for the region'),
+				ruleType: z
+					.array(z.union([z.string(), z.number()]))
+					.optional()
+					.describe('Rule type(s) for the region: "no_components" (2), "no_wires" (5), "no_fills" (6), "no_pours" (7), "no_inner_layers" (8), "follow_region_rule" (9), or the numbers. Names are converted to the numeric values EasyEDA requires; a string stored as-is makes EasyEDA save an empty rule.'),
 				regionName: z.string().optional().describe('Name for the region'),
 				lineWidth: z.number().optional().describe('Outline width'),
 			}),
@@ -241,13 +288,14 @@ export function writeTools(ctx: ToolContext): ToolDef[] {
 			name: 'pcb_modify_primitive',
 			annotations: ANN.WRITE_MODIFY,
 			description: `Modify properties of a PCB primitive. Property keys vary by type:
-- via: net, x, y, holeDiameter, diameter, viaType
+- via: net, x, y, holeDiameter, diameter, viaType ("through"/"blind"/"suture" or 0/1/2)
 - polyline: net, layer, lineWidth
 - arc: net, layer, startX, startY, endX, endY, arcAngle, lineWidth
 - pad: x, y, rotation, net, padNumber, layer
 - pour: net, layer, pourFillMethod, preserveSilos, pourName, pourPriority, lineWidth
-- fill: layer, net, fillMode, lineWidth
-- region: layer, ruleType, regionName, lineWidth
+- fill: layer, net, fillMode ("solid"/"mesh"/"inner_electrical_layer" or 0/1/2), lineWidth
+- region: layer, ruleType (array of "no_components"/"no_wires"/"no_fills"/"no_pours"/"no_inner_layers"/"follow_region_rule" or 2/5/6/7/8/9), regionName, lineWidth
+Enum names are converted to the numeric values EasyEDA requires.
 All types support: primitiveLock
 ${PCB_COORD_NOTE}`,
 			inputShape: withDocumentParam({

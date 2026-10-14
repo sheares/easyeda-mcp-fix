@@ -1,3 +1,5 @@
+import { toPolygonSource } from './pcb-params';
+
 export const documentHandlers: Record<string, (params: Record<string, any>) => Promise<any>> = {
 	// === Document ===
 
@@ -80,7 +82,10 @@ export const documentHandlers: Record<string, (params: Record<string, any>) => P
 			params.x,
 			params.y,
 			params.rotation,
-			params.pad,
+			// POLYGON pads take a polygon source; accept the ergonomic [{x, y}] form.
+			Array.isArray(params.pad) && params.pad[0] === 'POLYGON'
+				? ['POLYGON', toPolygonSource(params.pad[1])]
+				: params.pad,
 			params.net,
 			params.hole,
 			params.holeOffsetX,

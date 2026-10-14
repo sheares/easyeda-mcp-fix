@@ -1,4 +1,8 @@
+// The reference makes the EDA Pro ambient globals (eda) resolvable when ts-node
+// compiles this module outside tsconfig.extension.json (handler unit tests).
+/// <reference types="@jlceda/pro-api-types" />
 import { toClosedPolygonSource } from './pcb-params';
+import { describeError } from '../diag';
 
 export const pourFillHandlers: Record<string, (params: Record<string, any>) => Promise<any>> = {
 	// === Pour ===
@@ -35,6 +39,70 @@ export const pourFillHandlers: Record<string, (params: Record<string, any>) => P
 
 	'pcb.delete.pour': async (params) => {
 		return eda.pcb_PrimitivePour.delete(params.ids);
+	},
+
+	// Rebuild pours. Preferred path is the per-pour instance method
+	// rebuildCopperRegion() (@beta), which reports a result per pour. The
+	// collection call rebuildCopperRegions() (@alpha) is the fallback when the
+	// instance method is missing or every per-pour call failed. Handlers get live
+	// API objects, so instance methods are callable. Only ids and counts are
+	// returned, never the poured geometry.
+	'pcb.pour.rebuild': async (params) => {
+		const ids: string[] | undefined =
+			Array.isArray(params.primitiveIds) && params.primitiveIds.length > 0 ? params.primitiveIds : undefined;
+		const found: any[] = ids ? await eda.pcb_PrimitivePour.get(ids) : await eda.pcb_PrimitivePour.getAll();
+		const pours: any[] = (Array.isArray(found) ? found : []).filter(Boolean);
+		const idOf = (pour: any): string => {
+			try {
+				return String(pour.getState_PrimitiveId());
+			} catch {
+				return String(pour?.primitiveId ?? 'unknown');
+			}
+		};
+
+		const rebuilt: string[] = [];
+		const failed: Array<{ id: string; reason: string }> = [];
+		let pouredCount = 0;
+		let instanceCalls = 0;
+		for (const pour of pours) {
+			const id = idOf(pour);
+			if (typeof pour.rebuildCopperRegion !== 'function') continue;
+			instanceCalls++;
+			try {
+				const poured = await pour.rebuildCopperRegion();
+				if (poured === undefined) {
+					failed.push({ id, reason: 'EasyEDA returned no copper region for this pour' });
+				} else {
+					rebuilt.push(id);
+					pouredCount++;
+				}
+			} catch (err) {
+				failed.push({ id, reason: describeError(err) });
+			}
+		}
+
+		const canFallback = typeof (eda.pcb_PrimitivePour as any).rebuildCopperRegions === 'function';
+		if ((instanceCalls === 0 || rebuilt.length === 0) && canFallback && (pours.length > 0 || !ids)) {
+			try {
+				const poured = await eda.pcb_PrimitivePour.rebuildCopperRegions(ids);
+				const count = Array.isArray(poured) ? poured.length : 0;
+				return {
+					method: 'rebuildCopperRegions',
+					rebuilt: pours.map(idOf),
+					failed: [],
+					pouredCount: count,
+				};
+			} catch (err) {
+				failed.push({ id: ids ? ids.join(',') : 'all', reason: `rebuildCopperRegions: ${describeError(err)}` });
+			}
+		}
+
+		return {
+			method: instanceCalls > 0 ? 'rebuildCopperRegion' : 'none',
+			rebuilt,
+			failed,
+			pouredCount,
+		};
 	},
 
 	// === Fill ===
