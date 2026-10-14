@@ -90,6 +90,16 @@ test('pre-check rejects hand-built configs that lack the category/group/rule-set
 	}
 });
 
+test('pre-check rejects empty categories and empty rule groups', async () => {
+	assert.throws(() => assertPlausibleRuleConfiguration({ Spacing: {} }), /category "Spacing" has no rule groups/);
+	assert.throws(() => assertPlausibleRuleConfiguration({ Physics: { Track: {} } }), /"Physics\/Track" has no rule sets/);
+	await assert.rejects(
+		drcHandlers['pcb.drc.overwriteCurrentRuleConfig']({ ruleConfiguration: { Spacing: {} } }),
+		/has no rule groups/,
+	);
+	assert.equal(overwritten.length, 0);
+});
+
 test('false return with a readable list gives a normal rejection message', async () => {
 	saveImpl = async () => false;
 	listImpl = async () => [{ name: 'Default' }];

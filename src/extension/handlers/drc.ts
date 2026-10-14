@@ -42,8 +42,12 @@ export function assertPlausibleRuleConfiguration(config: unknown): asserts confi
 	if (!isPlainObject(config) || Object.keys(config).length === 0) refuse('it is not a non-empty configuration object');
 	for (const [category, groups] of Object.entries(config as Record<string, unknown>)) {
 		if (!isPlainObject(groups)) refuse(`category "${category}" is not an object of rule groups`);
+		// An empty category or group is never what EasyEDA returns; on 3.2.206
+		// overwriteCurrentRuleConfiguration({Spacing: {}}) got as far as EasyEDA.
+		if (Object.keys(groups as object).length === 0) refuse(`category "${category}" has no rule groups`);
 		for (const [group, sets] of Object.entries(groups as Record<string, unknown>)) {
 			if (!isPlainObject(sets)) refuse(`rule group "${category}/${group}" is not an object of rule sets`);
+			if (Object.keys(sets as object).length === 0) refuse(`rule group "${category}/${group}" has no rule sets`);
 			for (const [name, set] of Object.entries(sets as Record<string, unknown>)) {
 				if (!isPlainObject(set) || typeof set.editName !== 'string') {
 					refuse(`rule set "${category}/${group}/${name}" has no editName, so it is not in EasyEDA's own format`);
