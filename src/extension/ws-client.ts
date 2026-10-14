@@ -370,7 +370,15 @@ function handleMessage(extensionUuid: string, event: MessageEvent<any>): void {
 
 		// Bug 5: layer names must become numeric EPCB_LayerId before reaching
 		// eda.* calls, or EasyEDA stores dead string ids (see pcb-params.ts).
-		const normalizedParams = normalizePcbParams(method, handlerParams);
+		// A bad name is the caller's mistake, so report it plainly rather than
+		// as a protocol error with a stack trace.
+		let normalizedParams: Record<string, any>;
+		try {
+			normalizedParams = normalizePcbParams(method, handlerParams);
+		} catch (err) {
+			sendResponse(extensionUuid, id!, undefined, describeError(err));
+			return;
+		}
 
 		// Auto-switch document if specified, then validate doc type, then run
 		// handler — the whole pipeline deferred until the queue reaches this

@@ -1,3 +1,5 @@
+import { BridgeUserError } from '../diag';
+
 // EasyEDA stores whatever we pass as `layer` verbatim, and its pad-to-track
 // connectivity test compares layer ids with loose ==. A track created with
 // layer:"TopLayer" is stored as layerId:"TopLayer" while native SMD pads store
@@ -49,7 +51,7 @@ export function toLayerId(layer: unknown): unknown {
 	const compact = trimmed.toLowerCase().replace(/[^a-z0-9]/g, '');
 	const id = LAYER_NAME_TO_ID[compact] ?? LAYER_NAME_TO_ID[compact.replace(/layer/g, '')];
 	if (id !== undefined) return id;
-	throw new Error(
+	throw new BridgeUserError(
 		`Unknown PCB layer "${layer}". Use a layer name ("TopLayer", "BottomLayer", "Inner1".."Inner30", "Multi", "TopSilkscreen", "BoardOutline", ...) or a numeric EPCB_LayerId (1=Top, 2=Bottom, 12=Multi).`,
 	);
 }
@@ -100,7 +102,7 @@ function toEnumId(value: unknown, table: Record<string, number>, label: string, 
 	if (/^\d+$/.test(trimmed)) return Number(trimmed);
 	const id = table[trimmed.toLowerCase().replace(/[^a-z0-9]/g, '')];
 	if (id !== undefined) return id;
-	throw new Error(`Unknown ${label} "${value}". Use ${valid}, or the numeric value.`);
+	throw new BridgeUserError(`Unknown ${label} "${value}". Use ${valid}, or the numeric value.`);
 }
 
 /**
