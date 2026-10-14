@@ -373,6 +373,7 @@ function updateInstanceInfo(instanceId: string, data: Record<string, unknown>): 
 			log(`WARNING: extension ${instanceId} runs v${data.extensionVersion} but this daemon is v${DAEMON_VERSION}; reinstall the .eext or run bridge_restart so both layers match`);
 		}
 	}
+	if (typeof data.editorVersion === 'string') ext.info.editorVersion = data.editorVersion;
 	if (data.projectName !== undefined) ext.info.projectName = data.projectName as string;
 	if (data.currentDocument !== undefined) ext.info.currentDocument = data.currentDocument as string;
 	if (data.documentType !== undefined) ext.info.documentType = data.documentType as string;

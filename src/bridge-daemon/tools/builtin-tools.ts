@@ -12,7 +12,7 @@ export function builtinTools(ctx: ToolContext): ToolDef[] {
 		{
 			name: 'server_info',
 			annotations: ANN.READ_ONLY,
-			description: 'Get MCP server status: daemon version, WebSocket port, connection state, connected instances (each with the version of the .eext it runs), and allowed origins. versionMismatch is true when any connected extension runs a different version from the daemon; fix with a .eext reinstall (bump the version first, EasyEDA ignores same-version reinstalls) and/or bridge_restart.',
+			description: 'Get MCP server status: daemon version, WebSocket port, connection state, connected instances (each with the version of the .eext it runs and the EasyEDA editor version), and allowed origins. versionMismatch is true when any connected extension runs a different version from the daemon; fix with a .eext reinstall (bump the version first, EasyEDA ignores same-version reinstalls) and/or bridge_restart.',
 			inputShape: {},
 			handler: async () => {
 				const instances = ctx.getConnectedInstances();
@@ -32,6 +32,7 @@ export function builtinTools(ctx: ToolContext): ToolDef[] {
 							instances: instances.map((info) => ({
 								instanceId: info.instanceId,
 								extensionVersion: info.extensionVersion ?? 'unknown (pre-1.6.1 extension)',
+								editorVersion: info.editorVersion ?? 'unknown',
 								projectName: info.projectName,
 								currentDocument: info.currentDocument,
 								documentType: info.documentType,

@@ -48,6 +48,25 @@ export class BridgeUserError extends Error {
 	}
 }
 
+const DETAIL_CAP = 2000;
+
+function dumpErrorDetail(err: Error): string {
+	const parts: string[] = [];
+	const safe = (v: unknown): string => {
+		try { return JSON.stringify(v, Object.getOwnPropertyNames(Object(v))) ?? String(v); } catch { return String(v); }
+	};
+	if ((err as any).cause !== undefined) parts.push(`cause: ${safe((err as any).cause)}`);
+	const own: Record<string, unknown> = {};
+	for (const k of Object.getOwnPropertyNames(err)) {
+		if (k === 'stack' || k === 'message' || k === 'cause') continue;
+		own[k] = (err as any)[k];
+	}
+	if (Object.keys(own).length > 0) parts.push(`properties: ${safe(own)}`);
+	if (parts.length === 0) parts.push('(no cause or extra properties on the error)');
+	const text = `detail: ${parts.join('; ')}`;
+	return text.length > DETAIL_CAP ? `${text.slice(0, DETAIL_CAP)}... [truncated]` : text;
+}
+
 export function describeError(err: unknown): string {
 	if (err === undefined) return '<rejected with undefined>';
 	if (err === null) return '<rejected with null>';
@@ -55,6 +74,11 @@ export function describeError(err: unknown): string {
 		return err.message;
 	}
 	if (err instanceof Error) {
+		// EDA sometimes does `new Error(obj)`, so the message is the useless
+		// "[object Object]" (or empty) and the real detail sits in cause/own props.
+		if (err.message === '[object Object]' || err.message === '') {
+			return `${err.stack || `${err.name}: ${err.message}`}\n${dumpErrorDetail(err)}`;
+		}
 		return err.stack || `${err.name}: ${err.message}`;
 	}
 	if (typeof err === 'object') {

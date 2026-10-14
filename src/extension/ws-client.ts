@@ -208,6 +208,7 @@ async function getInstanceInfo(): Promise<Record<string, any>> {
 			// .eext build is actually running, so three-layer version drift is
 			// visible instead of guessed at.
 			extensionVersion: extensionConfig.version,
+			editorVersion: getEditorVersion(),
 			// Prefer friendlyName (user-visible display name) over name (a URL
 			// slug populated by the web backend but absent on desktop-local
 			// projects). Both fields are declared on IDMT_ProjectItem in
@@ -218,8 +219,21 @@ async function getInstanceInfo(): Promise<Record<string, any>> {
 			documents,
 		};
 	} catch {
-		return { instanceId, extensionVersion: extensionConfig.version };
+		return { instanceId, extensionVersion: extensionConfig.version, editorVersion: getEditorVersion() };
 	}
+}
+
+// EasyEDA editor version (eda.sys_Environment.getEditorCurrentVersion, since
+// EDA 3.2.176). Older builds lack it, so feature-detect and never throw.
+function getEditorVersion(): string {
+	try {
+		const env = (eda as any).sys_Environment;
+		if (typeof env?.getEditorCurrentVersion === 'function') {
+			const v = env.getEditorCurrentVersion();
+			if (typeof v === 'string' && v) return v;
+		}
+	} catch { /* fall through */ }
+	return 'unknown';
 }
 
 // Register the instance.getInfo handler alongside other handlers

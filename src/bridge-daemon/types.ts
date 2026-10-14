@@ -13,6 +13,8 @@ export interface InstanceInfo {
 	connectedAt: number;
 	/** Version of the .eext that is actually running (from its extension.json); absent on pre-1.6.1 extensions. */
 	extensionVersion?: string;
+	/** EasyEDA Pro editor version the extension runs in ('unknown' on builds without the API). */
+	editorVersion?: string;
 	projectName?: string;
 	currentDocument?: string;
 	documentType?: string;
