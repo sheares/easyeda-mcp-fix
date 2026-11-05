@@ -3,6 +3,12 @@ import { z } from 'zod';
 import { withDocumentParam, withQueryParams, PCB_COORD_NOTE } from './query-params';
 import * as ANN from './annotations';
 
+// EasyEDA Pro 3.2.209: the pro-api runtime sends { uuid, force } to the host,
+// but the host's PCB_Document.importChanges (pro-ui 3.2.198) reads only a
+// `source` field and runs the interactive import. It opens the Import Changes
+// dialog when there are changes and answers true as soon as the dialog is up.
+const IMPORT_FORCE_NOTE = 'force was passed, but EasyEDA Pro 3.2.209 ignores it. If the schematic had changes, EasyEDA\'s Import Changes dialog is now open and nothing has been applied yet: ask the user to click Apply, then read the board back before relying on it. true means the import ran as far as comparing netlists, not that changes were applied.';
+
 export function analysisTools(ctx: ToolContext): ToolDef[] {
 	return [
 		{
@@ -161,11 +167,16 @@ export function analysisTools(ctx: ToolContext): ToolDef[] {
 			description:
 				'Import changes from schematic into the PCB (sync schematic to PCB). Warning (upstream EDA bug, pro-api-sdk issue #33): pads of components newly placed by this call can read back with a null pad number until the PCB document is reloaded, and DRC may report an unstructured "Netlist Error". Close and reopen the PCB document (or reload via editor_open_document) before reading pads of freshly placed components.',
 			inputShape: withDocumentParam({
-				uuid: z.string().optional().describe('Schematic UUID (uses associated schematic if not provided)'),
+				uuid: z.string().optional().describe('Schematic UUID (uses associated schematic if not provided). EasyEDA Pro 3.2.209 ignores it and always uses the active board\'s own schematic.'),
+				force: z
+					.boolean()
+					.optional()
+					.describe('Asks for EasyEDA\'s non-interactive mode (no confirmation dialog, every change applied). EasyEDA Pro 3.2.209 ignores it: when the schematic has changes, its Import Changes dialog opens and the call returns true at once, before anything is applied, so the user must click Apply. The result carries a note saying so whenever force is passed.'),
 			}),
 			handler: async (params) => {
 				const result = await ctx.sendToExtension('pcb.document.importChanges', params);
-				return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
+				const body = params.force === true ? { result, note: IMPORT_FORCE_NOTE } : result;
+				return { content: [{ type: 'text', text: JSON.stringify(body, null, 2) }] };
 			},
 		},
 	];

@@ -5,7 +5,7 @@ import type { ToolDef, ToolContext } from '../types';
 import { withInstanceParam, withDocumentParam } from './query-params';
 import { backupDocument, backupProject, formatBackupSummary, type BackupResult } from '../backup';
 import { validateByDocType, type DocumentContext } from './schema-tools';
-import type { ValidationReport } from '../../lib/schema';
+import { normalisePipeLineEnds, type ValidationReport } from '../../lib/schema';
 import * as ANN from './annotations';
 
 /**
@@ -134,8 +134,9 @@ backup.sha references the pre-edit state. Validation runs for schematic and PCB 
 					"Schema validation mode for schematic uploads: 'off' skips entirely, 'warn' aborts only on malformed known tags or JSON parse errors, 'strict' (default) also aborts on any unknown-tag line.",
 				),
 			}),
-			handler: async ({ source, instance_id, document, validate }) => {
+			handler: async ({ source: given, instance_id, document, validate }) => {
 				const mode = validate ?? UPLOAD_VALIDATE_DEFAULT;
+				const { source, fixed: lineEndsFixed } = normalisePipeLineEnds(given);
 
 				// One fetch serves both the doc-type gate and the backup below
 				// (D3): without threading it through, the full document crossed
@@ -157,7 +158,8 @@ backup.sha references the pre-edit state. Validation runs for schematic and PCB 
 
 				const backup = await backupDocument(ctx, { instance_id, document, toolName: 'document_set_source', prefetched: current });
 				const result = await ctx.sendToExtension('fileManager.setDocumentSource', { source, instance_id, document }) as Record<string, unknown>;
-				return { content: [{ type: 'text', text: JSON.stringify({ ...result, backup, validation, note: formatBackupSummary(backup) }, null, 2) }] };
+				const fixedNote = lineEndsFixed > 0 ? { lineEndsFixed, lineEndsNote: 'Line ends were put back the way EasyEDA writes them (every line but the last ends in "|").' } : {};
+				return { content: [{ type: 'text', text: JSON.stringify({ ...result, ...fixedNote, backup, validation, note: formatBackupSummary(backup) }, null, 2) }] };
 			},
 		},
 		{
@@ -209,7 +211,7 @@ and 3); other types skip with a status.${WORKFLOW_HINT}`,
 			}),
 			handler: async ({ filePath, instance_id, document, validate }) => {
 				const mode = validate ?? UPLOAD_VALIDATE_DEFAULT;
-				const source = await readFile(filePath, 'utf8');
+				const { source, fixed: lineEndsFixed } = normalisePipeLineEnds(await readFile(filePath, 'utf8'));
 
 				// One fetch serves both the doc-type gate and the backup (D3).
 				const current = await fetchCurrentSourceAndContext(ctx, { instance_id, document });
@@ -229,7 +231,8 @@ and 3); other types skip with a status.${WORKFLOW_HINT}`,
 
 				const backup = await backupDocument(ctx, { instance_id, document, toolName: 'document_load_from_file', prefetched: current });
 				const result = await ctx.sendToExtension('fileManager.setDocumentSource', { source, instance_id, document }) as Record<string, unknown>;
-				return { content: [{ type: 'text', text: JSON.stringify({ ...result, loaded: filePath, size: source.length, backup, validation, note: formatBackupSummary(backup) }, null, 2) }] };
+				const fixedNote = lineEndsFixed > 0 ? { lineEndsFixed, lineEndsNote: 'Line ends were put back the way EasyEDA writes them (every line but the last ends in "|"); the file on disk is unchanged.' } : {};
+				return { content: [{ type: 'text', text: JSON.stringify({ ...result, loaded: filePath, size: source.length, ...fixedNote, backup, validation, note: formatBackupSummary(backup) }, null, 2) }] };
 			},
 		},
 		{
@@ -242,10 +245,12 @@ INSTANCE/ (per-instance attribute overrides), and more.
 All internal files are human-readable newline-delimited JSON arrays.${WORKFLOW_HINT}`,
 			inputShape: withInstanceParam({
 				filePath: z.string().describe('Absolute path to save the .epro file to'),
-				fileType: z.enum(['epro', 'epro2']).optional().describe('File format (default: epro)'),
+				fileType: z.enum(['epro', 'epro2']).optional().describe('File format (default: epro, the NDJSON-array format src/lib reads; epro2 is a zip holding one {header}||{body} .epru stream)'),
 			}),
 			handler: async ({ filePath, instance_id, ...rest }) => {
-				const result = await ctx.sendToExtension('fileManager.getProjectFile', { instance_id, ...rest }) as { fileName: string; data: string; size: number };
+				// EasyEDA 3.2.209 exports .epro2 when no type is given, which
+				// src/lib cannot read. Ask for epro explicitly, as documented.
+				const result = await ctx.sendToExtension('fileManager.getProjectFile', { instance_id, ...rest, fileType: rest.fileType ?? 'epro' }) as { fileName: string; data: string; size: number };
 				const raw = Buffer.from(result.data, 'base64');
 				await mkdir(dirname(filePath), { recursive: true });
 				await writeFile(filePath, raw);

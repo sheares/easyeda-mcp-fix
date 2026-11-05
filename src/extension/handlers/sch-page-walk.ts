@@ -1,3 +1,5 @@
+import { waitForDocumentReady } from '../ready-wait-eda';
+
 /**
  * Visit every schematic page in the project, running `visit` while that page
  * is active. EDA Pro ignores the `allSchematicPages` flag on the native
@@ -38,6 +40,9 @@ export async function forEachSchematicPage(
 			const uuid = page?.uuid;
 			if (!uuid) continue;
 			await eda.dmt_EditorControl.openDocument(uuid);
+			// A page that is still loading reads as empty (3.2.209+ only; a
+			// no-op before that).
+			await waitForDocumentReady(uuid);
 			const active: any = await eda.dmt_Schematic.getCurrentSchematicPageInfo();
 			if (active?.uuid !== uuid) {
 				throw new Error(

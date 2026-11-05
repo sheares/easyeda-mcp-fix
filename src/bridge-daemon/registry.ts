@@ -28,6 +28,8 @@ import { pcbLayerTools } from './tools/pcb-layer-tools';
 import { editorTools } from './tools/editor-tools';
 import { fileManagerTools } from './tools/file-manager-tools';
 import { schemaTools } from './tools/schema-tools';
+import { autorouteTools } from './tools/autoroute-tools';
+import { orientationTools } from './tools/orientation-tools';
 
 interface RegistryEntry {
 	def: ToolDef;
@@ -52,6 +54,8 @@ export class ToolRegistry {
 			editorTools,
 			fileManagerTools,
 			schemaTools,
+			autorouteTools,
+			orientationTools,
 		];
 
 		for (const mod of modules) {

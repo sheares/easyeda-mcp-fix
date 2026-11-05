@@ -1,4 +1,5 @@
 import { BridgeUserError } from '../diag';
+import { waitForDocumentReady } from '../ready-wait-eda';
 
 export const libraryHandlers: Record<string, (params: Record<string, any>) => Promise<any>> = {
 	'lib.device.search': async (params) => {
@@ -75,6 +76,9 @@ export const libraryHandlers: Record<string, (params: Record<string, any>) => Pr
 				`EDA Pro refused to open symbol ${params.symbolUuid} (library ${params.libraryUuid}) in the editor (returned ${JSON.stringify(result)}). System-library symbols cannot be opened this way; copy the symbol into a personal or project library first (lib_symbol_copy) and open that copy.`,
 			);
 		}
+		// The editor tab exists now but its canvas may still be loading. A no-op
+		// before 3.2.209.
+		await waitForDocumentReady(result);
 		return result;
 	},
 
@@ -98,6 +102,9 @@ export const libraryHandlers: Record<string, (params: Record<string, any>) => Pr
 				`EDA Pro refused to open footprint ${params.footprintUuid} (library ${params.libraryUuid}) in the editor (returned ${JSON.stringify(result)}). System-library footprints cannot be opened this way; copy the footprint into a personal or project library first and open that copy.`,
 			);
 		}
+		// The editor tab exists now but its canvas may still be loading. A no-op
+		// before 3.2.209.
+		await waitForDocumentReady(result);
 		return result;
 	},
 

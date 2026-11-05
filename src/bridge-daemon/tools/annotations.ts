@@ -12,6 +12,7 @@
 //                    no design data touched; repeatable
 //   WRITE_CREATE     adds new design data; repeating duplicates it
 //   WRITE_MODIFY     updates existing data; same args, same result
+//   FETCH_TO_LOCAL_FILE downloads from the web into a local folder
 //   WRITE_LOCAL_FILE writes bytes to a local path (exports); overwrites the
 //                    target file but never touches design data
 //   DESTRUCTIVE      deletes or replaces design data; not recoverable
@@ -58,6 +59,15 @@ export const WRITE_LOCAL_FILE: ToolAnnotations = {
 	destructiveHint: false,
 	idempotentHint: false,
 	openWorldHint: false,
+};
+
+// Downloads from the web (JLC / LCSC / makers) into a local folder; files
+// already there are kept, so a repeat run changes nothing.
+export const FETCH_TO_LOCAL_FILE: ToolAnnotations = {
+	readOnlyHint: false,
+	destructiveHint: false,
+	idempotentHint: true,
+	openWorldHint: true,
 };
 
 export const DESTRUCTIVE: ToolAnnotations = {

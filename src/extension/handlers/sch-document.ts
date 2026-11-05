@@ -1,6 +1,7 @@
 import { fetchParsedNetlist, fetchPinNames, fetchRawNetlist, invalidateNetlistCache } from './sch-netlist-utils';
 import { forEachSchematicPage } from './sch-page-walk';
 import { mapWithConcurrency } from './concurrency';
+import { normaliseDrcResult } from './drc-result';
 
 // D4: cap on concurrent getAllPinsByPrimitiveId calls during the
 // connectivity pin sweep. Unbounded, a 300-component board fired 300
@@ -28,16 +29,7 @@ export const schDocumentHandlers: Record<string, (params: Record<string, any>) =
 	// trusting a shape the runtime may not honour.
 	'sch.drc.check': async (params) => {
 		const result: any = await eda.sch_Drc.check(params.strict, params.userInterface, true);
-		if (typeof result === 'boolean') {
-			return {
-				passed: result,
-				note: 'This EDA Pro build returned only a pass/fail boolean (upstream pro-api-sdk issue #27); per-violation detail is unavailable here. Check the DRC panel in the EasyEDA UI for specifics.',
-			};
-		}
-		if (Array.isArray(result)) {
-			return { passed: result.length === 0, errors: result };
-		}
-		return result;
+		return normaliseDrcResult(result);
 	},
 
 	// Routed through getNetlistFile: the direct eda.sch_Netlist.getNetlist call is

@@ -159,11 +159,12 @@ Note (upstream EDA bug, pro-api-sdk issue #33): for components placed via the AP
 		{
 			name: 'pcb_run_drc',
 			annotations: ANN.READ_ONLY,
-			description: 'Run Design Rule Check (DRC) on the PCB. Returns { passed, errors? }. Some EDA Pro builds report only a pass/fail boolean at runtime (upstream pro-api-sdk issue #27); in that case "errors" is absent and a note says per-violation detail is unavailable. Run this (with connectivity checks) before any fabrication export.',
+			description: 'Run Design Rule Check (DRC) on the PCB. Returns { passed, errors?, summary?, truncated?, note? }. With violations, summary gives the total, the count per category (byType) and per "category › kind" (byKind); errors lists compact violations ({ category, kind, rule, objects, layer, at, message }), at most maxErrors of them (truncated says how many were left out). A note flags the common case of stale copper pours after routing changed. If EasyEDA grouped results into counted categories, a note says so. EDA Pro 3.2.206 and older report only a pass/fail boolean (upstream pro-api-sdk issue #27); then "errors" is absent and a note says per-violation detail is unavailable. Run this (with connectivity checks) before any fabrication export.',
 			inputShape: withQueryParams({
 				strict: z.boolean().default(true).describe('Whether to run strict DRC checks'),
 				ui: z.boolean().default(false).describe('Whether to show DRC results in UI'),
 				verbose: z.boolean().default(true).describe('If true, returns detailed violation list'),
+				maxErrors: z.number().int().min(0).max(5000).default(100).describe('Most violations to list (summary always counts them all). Default 100.'),
 			}),
 			handler: async (params) => {
 				const result = await ctx.sendToExtension('pcb.drc.check', params);

@@ -1,3 +1,5 @@
+import { waitForDocumentReady, waitForProjectReady } from '../ready-wait-eda';
+
 /**
  * Recursively strip keys that are useless to LLMs (e.g. titleBlockData, showTitleBlock).
  * Mutates in place for efficiency — callers should pass a fresh copy if needed.
@@ -28,6 +30,9 @@ function stripBloat(obj: any): any {
 
 export const editorHandlers: Record<string, (params: Record<string, any>) => Promise<any>> = {
 	'editor.project.getStructure': async () => {
+		// A project that is still loading reads as `data: []` (seen live on
+		// 3.2.209 straight after opening one). A no-op before 3.2.209.
+		await waitForProjectReady();
 		const [project, currentDoc] = await Promise.all([
 			eda.dmt_Project.getCurrentProjectInfo(),
 			eda.dmt_SelectControl.getCurrentDocumentInfo(),
@@ -67,7 +72,11 @@ export const editorHandlers: Record<string, (params: Record<string, any>) => Pro
 	},
 
 	'editor.openDocument': async (params) => {
-		return eda.dmt_EditorControl.openDocument(params.documentUuid);
+		const opened = await eda.dmt_EditorControl.openDocument(params.documentUuid);
+		// Return only once the document can be read, so a follow-up call does
+		// not see it half-loaded. A no-op before 3.2.209.
+		await waitForDocumentReady(params.documentUuid);
+		return opened;
 	},
 
 	'editor.getOpenTabs': async () => {

@@ -16,10 +16,12 @@ import { layerHandlers } from './handlers/layer';
 import { pcbPrimitiveHandlers } from './handlers/pcb-primitive';
 import { editorHandlers } from './handlers/editor';
 import { fileManagerHandlers } from './handlers/file-manager';
+import { autoJobHandlers } from './handlers/auto-job';
 import { BridgeUserError, bridgeLog, describeError, setBridgeLogEmitter } from './diag';
 import { normalizePcbParams } from './handlers/pcb-params';
 import { validateAuthTokenPath } from './auth-path-validator';
 import { checkActiveDocument } from './active-document-check';
+import { waitForDocumentReady } from './ready-wait-eda';
 import { buildExtensionAuthAnswer, daemonMacMessage, hmacSha256Hex } from '../bridge-daemon/auth-mac';
 import { createRequestQueue } from './request-queue';
 import { allowsRequests, createVerificationGate, type VerificationGate } from './daemon-verification';
@@ -170,6 +172,7 @@ const allHandlers: Record<string, (params: Record<string, any>) => Promise<any>>
 	...pcbPrimitiveHandlers,
 	...editorHandlers,
 	...fileManagerHandlers,
+	...autoJobHandlers,
 };
 
 async function getInstanceInfo(): Promise<Record<string, any>> {
@@ -423,6 +426,10 @@ function handleMessage(extensionUuid: string, event: MessageEvent<any>): void {
 			try {
 				if (document) {
 					await switchToDocument(document);
+					// openDocument resolves before the document's data has
+					// loaded. Wait for it (3.2.209+; a no-op before that) so the
+					// handler does not read a half-loaded document. Never throws.
+					await waitForDocumentReady(document);
 				}
 			} catch (err: any) {
 				if (isForceReleased()) {

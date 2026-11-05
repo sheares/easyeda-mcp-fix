@@ -40,6 +40,8 @@ const MUST_BE_DESTRUCTIVE = [
 	'pcb_import',
 	'sch_import_changes',
 	'pcb_import_changes',
+	'pcb_autoroute_start',
+	'pcb_autolayout_start',
 	'bridge_restart',
 ];
 
@@ -80,9 +82,9 @@ test('no tool is both read-only and destructive', () => {
 	}
 });
 
-test('only the LCSC-backed lookups are open-world', () => {
+test('only the LCSC/JLC-backed lookups and the datasheet fetch are open-world', () => {
 	const openWorld = descriptors.filter((d) => d.annotations?.openWorldHint === true).map((d) => d.name).sort();
-	assert.deepEqual(openWorld, ['lib_get_device_by_lcsc', 'lib_search_device']);
+	assert.deepEqual(openWorld, ['lib_get_device_by_lcsc', 'lib_search_device', 'project_fetch_datasheets']);
 });
 
 test('create tools are writes, not destructive, not idempotent', () => {

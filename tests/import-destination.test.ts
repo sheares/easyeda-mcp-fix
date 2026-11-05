@@ -36,8 +36,8 @@ test('a lookup that throws counts as absent, not as a failure', async () => {
 });
 
 test('explicit team and name are passed through', async () => {
-	const saveTo = await resolveImportSaveTo({ newProjectOwnerTeamUuid: 'T', newProjectName: 'Colpen LDO test' }, lookups(TEAM));
-	assert.deepEqual(saveTo, { operation: 'New Project', newProjectOwnerTeamUuid: 'T', newProjectFriendlyName: 'Colpen LDO test' });
+	const saveTo = await resolveImportSaveTo({ newProjectOwnerTeamUuid: 'T', newProjectName: 'Demo LDO test' }, lookups(TEAM));
+	assert.deepEqual(saveTo, { operation: 'New Project', newProjectOwnerTeamUuid: 'T', newProjectFriendlyName: 'Demo LDO test' });
 });
 
 test('no team anywhere -> a clear error instead of EasyEDA\'s silent undefined', async () => {

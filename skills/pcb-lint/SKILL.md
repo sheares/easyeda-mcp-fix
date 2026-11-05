@@ -12,7 +12,7 @@ It is a second pair of eyes, not a sign-off. It catches the common, expensive mi
 ## What is in this folder
 
 - `SKILL.md` (this file): the operational rules you follow.
-- `scripts/checks/{sch,pcb}_*.py`: a Python reference implementation of 25 of the 26 checks, unit-tested against mock MCP payloads (`tests/`, 189 tests). When a rule below is ambiguous, read the Python. If the Python and this file disagree, the Python is the truth.
+- `scripts/checks/{sch,pcb}_*.py`: a Python reference implementation of 25 of the 28 checks (PCB-23 and PCB-24 are computed by the MCP tools `pcb_check_orientation` and `pcb_check_track_widths` themselves, tested in the server repo), unit-tested against mock MCP payloads (`tests/`, 189 tests). When a rule below is ambiguous, read the Python. If the Python and this file disagree, the Python is the truth.
 - `scripts/config.example.json`: a template for the optional per-board config.
 
 The Python is a test harness and reference, **not** the runner. You are the runner.
@@ -43,7 +43,9 @@ If no `mcp__easyeda__*` tools are available at all, the MCP server is not regist
 2. **Fetch PCB data once** (PCB checks):
    - `mcp__easyeda__pcb_run_drc` (verbose=true) → violation list
    - `mcp__easyeda__pcb_get_all_primitives` for types: via, pad, component, track (track per high-speed net if the config declares any)
-3. **Datasheets before judgement.** Before reporting any IC-related finding (SCH-02, SCH-07, SCH-08, PCB-02, PCB-05), check what the part's datasheet actually says. Many bypass capacitors are "recommended", not "required". If the user's project folder has a `datasheets/` folder, use it; otherwise fetch the datasheet for each non-passive part you are about to flag (sub-agents in parallel work well for this). Never flag an IC from memory alone.
+   - `mcp__easyeda__pcb_check_orientation` with `projectFolder` (for PCB-23; run it after the datasheet stash in step 3 so parts can reach "ok")
+   - `mcp__easyeda__pcb_check_track_widths` (for PCB-24)
+3. **Datasheets before judgement.** Run `mcp__easyeda__project_fetch_datasheets` with the user's project folder first: it stashes every non-passive part's PDF in `<project>/datasheets/` (cached after the first run) and lists any it could not get. Before reporting any part-related finding (SCH-02, SCH-07, SCH-08, PCB-02, PCB-05, PCB-23), read what that part's datasheet actually says, with `pdftotext -layout` or Read with pages for drawings. Many bypass capacitors are "recommended", not "required". For a part the tool could not fetch, get the PDF by hand (a browser often works) or say plainly that the finding is unverified. Never flag a part from memory alone.
 4. **Run each check** in the selected mode against the fetched data. Collect findings as `{check_id, severity, message, offending_ids, suggestion}`. When the datasheet labels a part as "recommended, not required", downgrade the finding from warn to info and quote the section.
 5. **Parallel-run sweep (PCB boards).** In addition to PCB-03, look for noisy-next-to-sensitive pairs (motor, switching or clock nets running alongside UART, I2C or ADC nets), including on different layers stacked on top of each other, and mention any you find.
 6. **Assemble the report** in the output shape below. Print the markdown to the user. Write the JSON sidecar as `pcb-lint-<board>-<ISO-time>.json` in the user's project folder (the current working directory if unsure).
@@ -137,7 +139,7 @@ Findings:
 
 Skip with an info finding if the board has no MCU, or the MCU has a factory USB bootloader wired to its USB connector (RP2040 BOOTSEL, ESP32 auto-download through a USB-serial chip, and similar).
 
-## Checks: PCB manufacturing (10 checks)
+## Checks: PCB manufacturing (11 checks)
 
 ### PCB-01: PCB DRC clean (error)
 `pcb_run_drc(verbose=true)` returns a list of violations, `[]` if clean. Any violation: **error** with the count.
@@ -188,7 +190,13 @@ Wi-Fi, Bluetooth and LoRa modules with on-board antennas need a zone free of cop
 - Per zone, check track segments (endpoints and segment crossing), pad and via centres, pour vertices and component pad bounding boxes (component centre if no pads are attached). **Error** per intrusion with the ID and depth.
 - Zone coordinates use the board's own origin, the same frame as component x/y in EasyEDA. Only circle and rect zones are supported.
 
-## Checks: signal integrity (4 checks)
+### PCB-24: Track width against its net's rule (error / warn)
+From `pcb_check_track_widths`, which reads the project export, not live queries. Each net's track rule comes from the net itself, its differential pair, its net class, or else the board default.
+- A `fail` net (tracks below the rule's minimum or above its maximum): **error**, giving the narrowest width, the rule and the track ids. EasyEDA's own DRC on 3.2.209 did not report these, so PCB-01 passing does not cover them.
+- A `review` net (narrower than its net class's default width in places): **warn**, unless a copper fill or pour on that net carries the current (`copperFills` above 0, or a pour you can see), in which case **info**. Say how much current the net carries if the schematic or a datasheet tells you.
+- Verdict `inconclusive` (no PCB, no tracks, or no rule applies): **warn**, and say the check did not run.
+
+## Checks: signal integrity (5 checks)
 
 ### PCB-02: Decoupling capacitor distance (warn / info)
 The physical half of SCH-02. For each IC power pin, measure **pad-to-pin distance**: from the decoupling capacitor's pad on that net to the IC's power pin pad (fetch with `pcb_get_all_primitives(type='pad')` filtered by net, then match designators).
@@ -205,6 +213,13 @@ For each TVS or ESD part (names containing USBLC, SP0503, ESDA, PESD, TPD, TVS, 
 ### PCB-19: Differential pair via balance (warn)
 For each pair in `differential_pairs` config, count vias on each net. Flag unequal counts (for example USB D+ with 2 vias and D- with 4). Harmless at USB full speed, a problem at high speed.
 
+### PCB-23: Part orientation (error)
+From `pcb_check_orientation`, which reads EasyEDA's own fabrication files (project export, flying-probe file, pick-and-place file), not live queries. For every LED, diode, polarised part and chip it checks that the footprint's polarity mark points at the cathode or pin 1 named in the symbol, that the pick-and-place pin-1 point sits on pad 1, and that LED/diode and chip power-pin nets make sense.
+- A `fail` part: **error** with the tool's message. Before reporting it, open that part's datasheet and confirm from the pin configuration and package drawing which terminal is the cathode or pin 1; quote the page.
+- A `review` part: **warn**. Most often the datasheet is not stashed or not yet read; read it, then pass or flag the part yourself, saying what the datasheet showed.
+- An `inconclusive` part (no symbol pin names, no footprint in the export, no pad 1): **warn**, and say the part was not checked. Never count it as clean.
+- Verdict `pass`: no finding. Still tell the user to check the fab's own placement preview before paying: it applies its own rotation library.
+
 ## Failure modes (no silent passes)
 
 | Situation | Behaviour |
@@ -213,6 +228,9 @@ For each pair in `differential_pairs` config, count vias on each net. Flag unequ
 | One MCP call fails mid-run | Retry twice about 1 s apart. Still failing: skip only that check with an info finding "XX skipped: `<tool>` failed after retries" and continue. |
 | MCP returns an unexpected shape | Skip that check with an info finding naming the payload. Continue. |
 | `high_speed_nets` empty | Skip PCB-03 with an info finding. |
+| `pcb_check_orientation` verdict `inconclusive` | Report PCB-23 as warn with the parts not checked. Never a pass. |
+| `pcb_check_track_widths` verdict `inconclusive` | Report PCB-24 as warn and say why it did not run. Never a pass. |
+| `project_fetch_datasheets` cannot reach the network | Say so, list the parts with no datasheet, and mark every finding about them as unverified. |
 | Board has no components | Abort: "no components found; nothing to lint". |
 | Config is malformed JSON | Abort with an error naming the problem. |
 | Config absent | Run with defaults; emit CONFIG-01 info. |

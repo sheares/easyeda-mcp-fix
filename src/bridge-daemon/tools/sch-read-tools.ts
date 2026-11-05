@@ -259,7 +259,7 @@ Use the depth parameter (default 2) to automatically trace through $-prefixed ne
 			name: 'sch_run_drc',
 			annotations: ANN.READ_ONLY,
 			description:
-				'Run Design Rule Check (DRC) on the schematic. Returns { passed, errors? }. Some EDA Pro builds report only a pass/fail boolean at runtime (upstream pro-api-sdk issue #27); in that case "errors" is absent and a note says per-violation detail is unavailable.',
+				'Run Design Rule Check (DRC) on the schematic. Returns { passed, errors?, summary?, note? }. On EasyEDA 3.2.209 the schematic result is GROUPED: each entry in "errors" is a category such as { type: "warn", count: 4 }, not a single violation, so read summary.total and summary.byType for the real numbers. passed is false for warnings as well as errors. Older EDA Pro builds report only a pass/fail boolean (upstream pro-api-sdk issue #27); then "errors" is absent and a note says per-violation detail is unavailable.',
 			inputShape: withQueryParams({
 				strict: z.boolean().optional().describe('Whether to run strict DRC checks'),
 				userInterface: z.boolean().optional().describe('Whether to show DRC results in UI'),

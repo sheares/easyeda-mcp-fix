@@ -5,7 +5,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { isPipeFormatSource, validatePipeSource } from '../src/lib/schema';
+import { isPipeFormatSource, validatePipeSource, normalisePipeLineEnds } from '../src/lib/schema';
 import { validatePcbSource, validateSchematicSource } from '../src/bridge-daemon/tools/schema-tools';
 import { parseSchematic, parseSymbol } from '../src/lib/schematic-reader';
 import { SymbolEditor } from '../src/lib/symbol/symbol-editor';
@@ -62,4 +62,34 @@ test('the reader and symbol editor refuse a pipe source instead of reading an em
 	assert.throws(() => parseSchematic(PIPE), /pipe-delimited format/);
 	assert.throws(() => parseSymbol(PIPE), /pipe-delimited format/);
 	assert.throws(() => SymbolEditor.load(PIPE), /project_export_file/);
+});
+
+test('normalisePipeLineEnds leaves a source EasyEDA wrote alone', () => {
+	const r = normalisePipeLineEnds(PIPE);
+	assert.equal(r.fixed, 0);
+	assert.equal(r.source, PIPE.replace(/\n$/, ''));
+});
+
+test('normalisePipeLineEnds repairs a source whose last record was deleted or that had one appended', () => {
+	const lines = PIPE.split('\n').filter((l) => l !== '');
+	// Last record deleted: the new last line keeps its "|", which EasyEDA rejects.
+	const deleted = normalisePipeLineEnds(lines.slice(0, -1).join('\n') + '\n');
+	assert.equal(deleted.fixed, 1);
+	assert.ok(!deleted.source.endsWith('|'));
+	assert.ok(deleted.source.split('\n').slice(0, -1).every((l) => l.endsWith('|')));
+	// A record appended after the old last line: that line now needs its "|".
+	const appended = normalisePipeLineEnds([...lines, '{"type":"VIA","id":"v1"}||{"netName":"GND","centerX":1,"centerY":2}|'].join('\n'));
+	assert.equal(appended.fixed, 2);
+	const out = appended.source.split('\n');
+	assert.ok(out.slice(0, -1).every((l) => l.endsWith('|')));
+	assert.ok(out[out.length - 1].endsWith('}'));
+	assert.equal(validatePipeSource(appended.source, 'epcb').invalidCount, 0);
+});
+
+test('normalisePipeLineEnds handles empty bodies, CRLF and blank lines, and ignores other formats', () => {
+	const src = '{"type":"DOCHEAD"}||{"docType":"PCB"}|\r\n\r\n{"type":"PAD_NET","id":"x"}||\r\n{"type":"PAD_NET","id":"y"}|||';
+	const r = normalisePipeLineEnds(src);
+	assert.deepEqual(r.source.split('\n'), ['{"type":"DOCHEAD"}||{"docType":"PCB"}|', '{"type":"PAD_NET","id":"x"}|||', '{"type":"PAD_NET","id":"y"}||']);
+	assert.equal(normalisePipeLineEnds(ARRAY_ESCH).source, ARRAY_ESCH);
+	assert.equal(normalisePipeLineEnds(ARRAY_ESCH).fixed, 0);
 });

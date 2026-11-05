@@ -193,7 +193,8 @@ export function wrapAsParsedLine<L>(data: L): ParsedLine<L> {
  * document_save_to_file) as `{header}||{body}|` lines rather than the JSON
  * arrays the per-tag schemas describe; project_export_file still writes JSON
  * arrays. The header names the line's `type` (and usually `id` and `ticket`);
- * the body holds the data, and some lines end in a single `|`, some do not.
+ * the body holds the data, and every line but the last ends in a single `|`
+ * (see normalisePipeLineEnds).
  */
 export function isPipeFormatSource(source: string): boolean {
 	const firstLine = source.trimStart().split('\n', 1)[0];
@@ -231,6 +232,56 @@ function splitPipeLine(line: string): { ok: true; type: string } | { ok: false; 
 		return { ok: true, type: (header as any).type };
 	}
 	return { ok: false, reason: 'no JSON header followed by "||"' };
+}
+
+/** Index of the "||" that ends a line's JSON header, or -1. */
+function pipeHeaderEnd(line: string): number {
+	for (let at = line.indexOf('||'); at >= 0; at = line.indexOf('||', at + 1)) {
+		try {
+			JSON.parse(line.slice(0, at));
+			return at;
+		} catch {
+			// not the header's end yet
+		}
+	}
+	return -1;
+}
+
+/**
+ * EasyEDA writes a pipe source as records joined by "|\n": every line ends in
+ * "|" except the last. setDocumentSource rejects a source that breaks this
+ * ("Failed to set document source - the format may be invalid"), which is easy
+ * to do by hand: delete the record that was last, or append one after it. Seen
+ * on EasyEDA Pro 3.2.209 (5 Nov 2026). This puts the line ends back the way
+ * EasyEDA writes them and drops blank lines. Any other format is returned
+ * unchanged.
+ */
+export function normalisePipeLineEnds(source: string): { source: string; fixed: number } {
+	if (!isPipeFormatSource(source)) return { source, fixed: 0 };
+	let fixed = 0;
+	const lines: string[] = [];
+	for (const raw of source.split('\n')) {
+		const line = raw.endsWith('\r') ? raw.slice(0, -1) : raw;
+		if (line !== raw) fixed++;
+		if (line.trim() === '') continue;
+		lines.push(line);
+	}
+	const blankInside = source.replace(/\r?\n$/, '').split('\n').filter((l) => l.trim() === '').length;
+	fixed += blankInside;
+	for (let i = 0; i < lines.length; i++) {
+		const at = pipeHeaderEnd(lines[i]);
+		if (at < 0) continue; // left for the validator to report
+		const rest = lines[i].slice(at + 2);
+		const last = i === lines.length - 1;
+		if (last && rest.endsWith('|')) {
+			lines[i] = lines[i].slice(0, -1);
+			fixed++;
+		} else if (!last && !rest.endsWith('|')) {
+			lines[i] += '|';
+			fixed++;
+		}
+	}
+	return { source: lines.join('\n'), fixed };
 }
 
 /** Structural check of a pipe-delimited source. See PIPE_FORMAT_NOTE. */

@@ -2,6 +2,7 @@
 // compiles this module outside tsconfig.extension.json (handler unit tests).
 /// <reference types="@jlceda/pro-api-types" />
 import { BridgeUserError, describeError } from '../diag';
+import { normaliseDrcResult } from './drc-result';
 
 /**
  * pcb_get_design_rules returns {config, name}; the API wants only the config
@@ -110,16 +111,7 @@ export const drcHandlers: Record<string, (params: Record<string, any>) => Promis
 	// be the reliable one.
 	'pcb.drc.check': async (params) => {
 		const result: any = await eda.pcb_Drc.check(params.strict, params.ui, params.verbose);
-		if (typeof result === 'boolean') {
-			return {
-				passed: result,
-				note: 'This EDA Pro build returned only a pass/fail boolean (upstream pro-api-sdk issue #27); per-violation detail is unavailable here. Check the DRC panel in the EasyEDA UI for specifics.',
-			};
-		}
-		if (Array.isArray(result)) {
-			return { passed: result.length === 0, errors: result };
-		}
-		return result;
+		return normaliseDrcResult(result, params.verbose !== false, typeof params.maxErrors === 'number' ? params.maxErrors : undefined);
 	},
 
 	// === Rule Configuration ===

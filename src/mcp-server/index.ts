@@ -14,6 +14,7 @@ import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { fromJSONSchema } from 'zod';
 import { resolve as resolvePath } from 'node:path';
 import { ProxyClient } from './proxy-client';
+import { planToolSync, toolFingerprint } from './tool-sync';
 import type { ToolDescriptor } from '../bridge-daemon/protocol';
 
 // Q6: injected by esbuild at build time (config/esbuild.prod.ts) from
@@ -28,6 +29,9 @@ function buildInstructions(repoRoot: string): string {
 		'This server provides direct access to schematic and PCB designs in EasyEDA Pro.',
 		'When the user asks about their circuit designs, schematics, PCB layouts, components, footprints, or netlist connections, check this server in addition to (or instead of) searching the filesystem for design files.',
 		'Start with `server_info` to check connectivity, then use `editor_get_open_tabs` or `project_get_structure` to discover what designs are available.',
+		'',
+		'DATASHEETS FIRST: before any decision about a part (its orientation, pinout, a missing support part, a DRC waiver), run `project_fetch_datasheets` with the user\'s project folder, then read the relevant sections of the stashed PDF (pin configuration, package drawing, marking, recommended circuit) with `pdftotext -layout` or Read with pages. Never judge a part from memory or from the symbol alone.',
+		'ORIENTATION: run `pcb_check_orientation` (with the same projectFolder) after any placement change, including `pcb_autolayout_start`, and before any order. It checks every LED, diode and chip against EasyEDA\'s own fabrication files; confirm each flagged part against its datasheet before acting.',
 		'',
 		`This MCP server's source lives at ${repoRoot}. The editing library, schema, examples, and tests are all under that path; consult them when the tool descriptions aren't enough.`,
 		'',
@@ -74,6 +78,7 @@ async function main() {
 	);
 
 	const registeredTools = new Map<string, RegisteredTool>();
+	const fingerprints = new Map<string, string>();
 
 	function registerDescriptor(d: ToolDescriptor): void {
 		const inputSchema = hydrateInputSchema(d);
@@ -94,27 +99,22 @@ async function main() {
 			(async (args: Record<string, unknown>) => proxy.callTool(d.name, args)) as any,
 		);
 		registeredTools.set(d.name, handle);
+		fingerprints.set(d.name, toolFingerprint(d));
 	}
 
 	function syncToolList(latest: ToolDescriptor[]): void {
-		const seen = new Set<string>();
-		for (const d of latest) {
-			seen.add(d.name);
-			if (registeredTools.has(d.name)) {
-				// Already registered. We could detect schema/description changes and
-				// re-register, but for now treat name as the identity — same name
-				// means same tool. Daemon respawn with a new schema for an existing
-				// tool will keep the old registration (rare; cheap to add later).
-				continue;
-			}
-			registerDescriptor(d);
+		const plan = planToolSync(fingerprints, latest);
+		// A changed tool must be re-registered: the SDK validates arguments
+		// against the registered zod schema and silently strips keys it does
+		// not know, so a parameter added by a daemon upgrade never reached the
+		// daemon (seen 5 Nov 2026: pcb_run_drc's new maxErrors was dropped
+		// after bridge_restart).
+		for (const name of [...plan.remove, ...plan.replace.map((d) => d.name)]) {
+			registeredTools.get(name)?.remove();
+			registeredTools.delete(name);
+			fingerprints.delete(name);
 		}
-		for (const [name, handle] of registeredTools) {
-			if (!seen.has(name)) {
-				handle.remove();
-				registeredTools.delete(name);
-			}
-		}
+		for (const d of [...plan.replace, ...plan.add]) registerDescriptor(d);
 	}
 
 	// Initial registration before connecting transport (so the capability

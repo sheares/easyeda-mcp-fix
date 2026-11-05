@@ -52,7 +52,12 @@ export const documentHandlers: Record<string, (params: Record<string, any>) => P
 	},
 
 	'pcb.document.importChanges': async (params) => {
-		return eda.pcb_Document.importChanges(params.uuid);
+		// The runtime takes a second `force` argument (in pro-api 0.3.50 and
+		// 0.3.59) that the published types omit; 0.4.27's docs describe it as
+		// the no-dialog mode. The 3.2.209 host ignores both arguments (it reads
+		// only `source`), so the dialog still opens there; see analysis-tools.ts.
+		const importChanges = eda.pcb_Document.importChanges as unknown as (uuid?: string, force?: boolean) => Promise<boolean>;
+		return importChanges.call(eda.pcb_Document, params.uuid, params.force === true);
 	},
 
 	// === Selection ===

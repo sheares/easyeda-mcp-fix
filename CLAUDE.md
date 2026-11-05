@@ -30,6 +30,9 @@ Which folder are you in?
 - **Use the script workflow for bulk schematic edits** (more than a handful of primitives). This is the export, edit with `src/lib`, load back flow in the server instructions; it is much faster and safer than dozens of single calls.
 - **Report the backup SHA** that every destructive call returns, so the user can get back to the previous state.
 - **Check your own work.** After an edit, re-read what changed and run `sch_run_drc` or `pcb_run_drc`. After metadata edits, run `sch_export_bom` and confirm no part has lost its LCSC number.
+- **Datasheets before decisions.** Run `project_fetch_datasheets` with the user's project folder, and read a part's pin configuration, package drawing and marking before saying anything about its orientation or pinout. Never judge a part from memory.
+- **Check orientation** with `pcb_check_orientation` after any placement change and before an order. It reads EasyEDA's own fabrication files, not live queries. Its verdict is `pass` only when every LED, diode and chip passed and has a datasheet.
+- **Check track widths** with `pcb_check_track_widths` after any routing, and always after the autorouter: on 3.2.209 it ignored net-class widths and EasyEDA's DRC did not catch it. A `review` net is narrower than its class default; say whether a fill or pour carries its current rather than calling it an error.
 - **Before they order boards:** run `/pcb-lint` and then EasyEDA's own DRC. pcb-lint is a second pair of eyes, not a sign-off.
 
 ## Don't
@@ -53,7 +56,7 @@ Destructive tools snapshot the document into the git repo at `~/.easyeda-mcp-bac
 ## Working on the code (source clone only)
 
 - **Layout:** `src/mcp-server` (stdio proxy), `src/bridge-daemon` (WebSocket bridge and all tool definitions in `tools/`), `src/extension` (runs inside EasyEDA), `src/lib` (schematic editing library; start at `src/lib/README.md`), `skills/pcb-lint` (Python reference checks plus `SKILL.md`).
-- **Commands:** `npm run typecheck`, `npm test` (251 tests, 2 skipped on Windows; the bridge-daemon suite spawns real daemons and is slow), `npm run build`, then `npm run smoke`. pcb-lint: `cd skills/pcb-lint && pip install -e ".[dev]" && pytest -q`.
+- **Commands:** `npm run typecheck`, `npm test` (313 tests, 2 skipped on Windows; the bridge-daemon suite spawns real daemons and is slow), `npm run build`, then `npm run smoke`. pcb-lint: `cd skills/pcb-lint && pip install -e ".[dev]" && pytest -q`.
 - **CI** (`.github/workflows/test.yml`) runs everything on Ubuntu, macOS and Windows on each push to `main` and `fix/mcp-bugs-1-2-3-4`. After pushing, check `gh run list`.
 - **Windows rules:** the bridge socket is a named pipe there (`socketPath()` in `src/bridge-daemon/protocol.ts`), so never chmod, unlink or stat it. Build paths with `path.join` and `path.basename`, never `split('/')`. Test ports must stay in 20000-29999, because Windows reserves blocks above 49152. `build/dist/` is gitignored and does not exist in a fresh clone.
 - **Releasing:** bump the version in **both** `package.json` and `extension.json`, because EasyEDA ignores a same-version `.eext` reinstall. Then build. Release assets are the `.eext` and `easyeda-mcp.zip`: an `easyeda-mcp/` folder holding the `.eext`, `dist/`, `skills/pcb-lint`, `README.md`, `docs/student-guide.md`, `LICENSE` and this file.

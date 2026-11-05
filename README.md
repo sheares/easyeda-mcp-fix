@@ -243,7 +243,7 @@ skills/
 docs/            student guide, .esch / .epcb / .epro file format reference
   dev-notes/     audit, QA reports and handover work orders
 examples/        working examples using the editing library
-tests/           208 tests (node --test, ts-node) + smoke-bundle.js
+tests/           313 tests (node --test, ts-node) + smoke-bundle.js
 ```
 
 ## Two distinct pieces
@@ -258,7 +258,7 @@ A pair of programs connected over WebSocket:
   It connects to the MCP server's WebSocket and dispatches API calls to
   EasyEDA Pro's internal `eda.*` namespace.
 
-The server exposes ~100 tools covering schematic primitives, PCB
+The server exposes ~110 tools covering schematic primitives, PCB
 primitives, libraries, manufacture exports, DRC and document I/O.
 Multiple EasyEDA Pro instances can share one daemon; every tool takes an
 optional `instance_id` and `document` param for cross-tab routing.
@@ -280,6 +280,39 @@ Two tool families are worth calling out for high-throughput workflows:
   metadata across matched components in one call, reusing the bug-1
   metadata guard so nothing else is wiped; supports `dryRun` for a
   preview before the real swap.
+- **`project_fetch_datasheets`** (v1.7.0) downloads the datasheet of
+  every non-passive part into `<project folder>/datasheets/` as
+  `{C-number}_{MPN}.pdf`, from the JLC parts record with the LCSC
+  mirror as fallback, keeps files already there, saves only real PDFs,
+  and writes `INDEX.md` and `index.json`.
+- **`pcb_check_orientation`** (v1.7.0) checks every LED, diode and chip
+  against EasyEDA's own fabrication files rather than live queries: the
+  footprint's polarity mark against the symbol's cathode or pin 1, the
+  pick-and-place pin-1 point against pad 1, and LED, diode and power-pin
+  nets. Its verdict is `pass` only when every part passed and has a
+  stashed datasheet.
+- **`pcb_autoroute_start`**, **`pcb_autolayout_start`**,
+  **`pcb_get_auto_job_status`**, **`pcb_get_auto_job_log`** and
+  **`pcb_cancel_auto_job`** (v1.7.0, experimental) run EasyEDA's
+  autorouter and auto-placement as jobs. The start tools back the board
+  up first. Where EasyEDA serves its background job API they use it.
+  EasyEDA Pro 3.2.209 does not, so they run the blocking autorouter in
+  the background instead: no progress figure, no cancel, and EasyEDA's
+  own 15-minute ceiling. Treat the result as a draft. On 3.2.209 the
+  autorouter ignored net-class track widths and left DRC faults behind,
+  so check widths per net class and run DRC after rebuilding the pours.
+- **`pcb_check_track_widths`** (v1.7.3) checks every copper track's
+  width against the track rule its net gets (its own, its differential
+  pair's, its net class's, else the board default), from the project
+  export. Below a rule's minimum is a failure; narrower than a net
+  class's default width is flagged for review, with the net's copper
+  fills counted. On 3.2.209 EasyEDA's own DRC did not report tracks
+  below their class minimum, so run this after any routing.
+- **`pcb_run_drc`** gives a compact result when a board has violations:
+  a summary counting every violation by category and kind, then at most
+  `maxErrors` (default 100) short violation records, rarest kinds first.
+  A note flags stale copper pours, the usual cause of hundreds of hits
+  after routing changes.
 
 ### 2. The schematic editing library
 
